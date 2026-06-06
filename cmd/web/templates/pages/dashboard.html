@@ -1,0 +1,114 @@
+{{define "page"}}
+<div class="terminal-theme rounded-lg overflow-hidden">
+
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
+
+<!-- Header -->
+<div class="t-header">
+  <div class="t-logo">QUANT<span>A</span></div>
+  <div class="search-box">
+    <input id="codeInput" type="text" placeholder="股票代码" maxlength="6" value="513630">
+    <button class="t-btn" id="analyzeBtn" onclick="analyze()">分析</button>
+  </div>
+  <div class="status-bar">
+    <span id="clockEl"></span>
+    <span class="status-dot" id="statusDot"></span>
+    <span id="statusText">就绪</span>
+  </div>
+</div>
+
+<!-- Grid -->
+<div class="t-container">
+  <div class="chart-main">
+    <div class="panel-hdr">K线图 <span class="tag" id="chartTag">日线</span></div>
+    <div id="klineChart" style="height:calc(100% - 28px)">
+      <div class="empty"><div class="icon">◇</div>输入代码开始分析</div>
+    </div>
+  </div>
+  <div class="chart-indicators">
+    <div>
+      <div class="panel-hdr">RSI(14)</div>
+      <div id="rsiChart" style="height:calc(100% - 28px)"></div>
+    </div>
+    <div>
+      <div class="panel-hdr">MACD(12,26,9)</div>
+      <div id="macdChart" style="height:calc(100% - 28px)"></div>
+    </div>
+  </div>
+  <div class="t-sidebar">
+    <div>
+      <div class="panel-hdr">交易信号</div>
+      <div class="signal-panel" id="signalPanel">
+        <div class="empty" style="height:120px"><div class="icon">◈</div>等待分析</div>
+      </div>
+    </div>
+    <div>
+      <div class="panel-hdr">实时监控 <span class="tag" id="monitorTag">离线</span></div>
+      <div class="monitor-panel" id="monitorPanel">
+        <div class="monitor-header">
+          <div><span class="monitor-price" id="monitorPrice">--</span><span class="monitor-chg" id="monitorChg"></span></div>
+          <div class="ws-status"><span class="status-dot" id="wsDot"></span><span id="wsText">未连接</span></div>
+        </div>
+        <div class="monitor-log" id="monitorLog"></div>
+      </div>
+    </div>
+  </div>
+  <div class="backtest-area">
+    <div class="panel-hdr">策略回测对比</div>
+    <div id="backtestWrap" style="overflow:auto">
+      <div class="empty" style="height:120px"><div class="icon">◆</div>等待分析</div>
+    </div>
+  </div>
+</div>
+
+<!-- 专业回测报告 -->
+<div class="bt-report">
+  <div class="panel-hdr">专业回测引擎</div>
+  <div class="bt-form">
+    <div class="bt-field"><label>标的代码</label><input id="btCode" type="text" maxlength="6" value="513630"></div>
+    <div class="bt-field"><label>策略</label><select id="btStrategy"></select></div>
+    <div class="bt-field"><label>初始资金</label><input id="btCash" type="number" step="any" value="100000"></div>
+    <div class="bt-field"><label>起始日期</label><input id="btStart" type="date"></div>
+    <div class="bt-field"><label>结束日期</label><input id="btEnd" type="date"></div>
+    <div class="bt-field bt-params-wrap"><label>策略参数</label><div id="btParams" class="bt-params"></div></div>
+    <div class="bt-field"><button class="t-btn" id="btRun">运行回测</button></div>
+    <div class="bt-field"><button class="t-btn" id="btCompare9">9策略对比</button></div>
+    <div id="btStatus" class="bt-status"></div>
+  </div>
+  <div class="bt-charts">
+    <canvas id="btEquityChart" style="width:100%;height:200px"></canvas>
+    <canvas id="btDrawdownChart" style="width:100%;height:140px"></canvas>
+  </div>
+  <div id="btMetrics" class="bt-metrics"></div>
+  <div id="btTrades" class="bt-trades"></div>
+  <div id="btCompare" class="bt-compare-table"></div>
+</div>
+
+<!-- 组合回测(多标的 + 风险管理) -->
+<div class="bt-report">
+  <div class="panel-hdr">组合回测引擎 <span class="tag">多标的</span></div>
+  <div class="bt-form">
+    <div class="bt-field" style="flex:1 1 100%"><label>标的代码(逗号或空格分隔, 2-50 个)</label><input id="pfCodes" type="text" value="513630, 513650, 159934"></div>
+    <div class="bt-field"><label>权重方案</label><select id="pfScheme"><option value="0">等权重</option><option value="1">指定权重</option><option value="2">波动率反比</option></select></div>
+    <div class="bt-field"><label>初始资金</label><input id="pfCash" type="number" step="any" value="100000"></div>
+    <div class="bt-field"><label>再平衡周期(交易日, 0=不再平衡)</label><input id="pfRebalance" type="number" value="20"></div>
+    <div class="bt-field"><label>现金保留比例</label><input id="pfReserve" type="number" step="0.01" value="0"></div>
+    <div class="bt-field"><button class="t-btn" id="pfRun">运行组合回测</button></div>
+    <div id="pfStatus" class="bt-status"></div>
+  </div>
+  <div class="bt-charts">
+    <canvas id="pfNavChart" style="width:100%;height:200px"></canvas>
+    <canvas id="pfWeightChart" style="width:100%;height:160px"></canvas>
+  </div>
+  <div id="pfMetrics" class="bt-metrics"></div>
+  <div id="pfAttribution" class="bt-trades"></div>
+</div>
+</div>
+
+<script src="/static/js/dashboard.js"></script>
+<script src="/static/js/backtest_charts.js"></script>
+<script src="/static/js/backtest.js"></script>
+<script src="/static/js/portfolio_charts.js"></script>
+<script src="/static/js/portfolio.js"></script>
+{{end}}

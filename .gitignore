@@ -1,0 +1,33 @@
+# macOS
+.DS_Store
+
+# Editor / local tool state
+.vscode/
+.idea/
+.claude/
+.kiro/
+.playwright-mcp/
+
+# Build artifacts
+/monitor
+/web
+/bin/
+/dist/
+/build/
+*.exe
+*.test
+*.out
+
+# Runtime data / databases
+/data/
+*.db
+*.db-shm
+*.db-wal
+
+# Logs
+*.log
+
+# Env / secrets
+.env
+.env.*
+!.env.example

@@ -1,0 +1,87 @@
+{{define "page"}}
+<div class="max-w-6xl mx-auto" x-data="UsersPage()" x-init="loadUsers()">
+    <div class="flex items-center justify-between mb-6">
+        <h2 class="text-xl font-semibold dark:text-white">用户管理</h2>
+        <span class="text-sm text-gray-500" x-text="'共 ' + users.length + ' 个用户'"></span>
+    </div>
+
+    <!-- Users Table -->
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow border border-gray-200 dark:border-gray-700 overflow-hidden">
+        <table class="w-full text-sm">
+            <thead class="bg-gray-50 dark:bg-gray-700">
+                <tr>
+                    <th class="px-4 py-3 text-left font-medium text-gray-500 dark:text-gray-400">ID</th>
+                    <th class="px-4 py-3 text-left font-medium text-gray-500 dark:text-gray-400">用户名</th>
+                    <th class="px-4 py-3 text-left font-medium text-gray-500 dark:text-gray-400">角色</th>
+                    <th class="px-4 py-3 text-left font-medium text-gray-500 dark:text-gray-400">状态</th>
+                    <th class="px-4 py-3 text-left font-medium text-gray-500 dark:text-gray-400">创建时间</th>
+                    <th class="px-4 py-3 text-right font-medium text-gray-500 dark:text-gray-400">操作</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
+                <template x-for="u in users" :key="u.id">
+                    <tr class="hover:bg-gray-50 dark:hover:bg-gray-700/50">
+                        <td class="px-4 py-3 text-gray-600 dark:text-gray-300" x-text="u.id"></td>
+                        <td class="px-4 py-3 font-medium dark:text-white" x-text="u.username"></td>
+                        <td class="px-4 py-3">
+                            <select x-model="u.role" @change="updateUser(u)"
+                                    class="text-xs px-2 py-1 rounded border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white">
+                                <option value="admin">管理员</option>
+                                <option value="user">普通用户</option>
+                            </select>
+                        </td>
+                        <td class="px-4 py-3">
+                            <button @click="u.status = u.status===1?0:1; updateUser(u)"
+                                    class="text-xs px-2 py-1 rounded"
+                                    :class="u.status===1 ? 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300' : 'bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300'"
+                                    x-text="u.status===1 ? '正常' : '禁用'">
+                            </button>
+                        </td>
+                        <td class="px-4 py-3 text-gray-500 dark:text-gray-400 text-xs" x-text="new Date(u.createdAt).toLocaleString('zh-CN')"></td>
+                        <td class="px-4 py-3 text-right">
+                            <button @click="deleteUser(u)" class="text-xs text-red-500 hover:text-red-700">删除</button>
+                        </td>
+                    </tr>
+                </template>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+function UsersPage() {
+    return {
+        users: [],
+        async loadUsers() {
+            try {
+                const res = await API.get('/api/admin/users');
+                this.users = res.data || [];
+            } catch(e) {
+                Toast.error('加载用户列表失败: ' + e.message);
+            }
+        },
+        async updateUser(u) {
+            try {
+                await API.put('/api/admin/users/' + u.id, {
+                    role: u.role, status: u.status
+                });
+                Toast.success('更新成功');
+            } catch(e) {
+                Toast.error('更新失败: ' + e.message);
+                this.loadUsers();
+            }
+        },
+        async deleteUser(u) {
+            if (!confirm('确定删除用户 ' + u.username + '？')) return;
+            try {
+                await API.delete('/api/admin/users/' + u.id);
+                this.users = this.users.filter(x => x.id !== u.id);
+                Toast.success('已删除');
+            } catch(e) {
+                Toast.error('删除失败: ' + e.message);
+            }
+        }
+    };
+}
+</script>
+{{end}}

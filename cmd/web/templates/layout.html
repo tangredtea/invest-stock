@@ -1,0 +1,121 @@
+{{define "layout"}}
+<!DOCTYPE html>
+<html lang="zh-CN" class="h-full">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{if .Title}}{{.Title}} - {{end}}量化分析终端</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config={
+            darkMode:'class',
+            theme:{extend:{colors:{primary:{DEFAULT:'#2563eb',hover:'#1d4ed8'}}}}
+        }
+    </script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script defer src="https://unpkg.com/alpinejs@3.14.3/dist/cdn.min.js"></script>
+    <link rel="stylesheet" href="/static/css/common.css">
+    <script>
+        (function(){
+            const t=localStorage.getItem('theme');
+            if(t==='dark'||(!t&&window.matchMedia('(prefers-color-scheme:dark)').matches)){
+                document.documentElement.classList.add('dark');
+            }
+            if(!localStorage.getItem('token')&&location.pathname!=='/login'){
+                location.href='/login';
+            }
+        })();
+    </script>
+</head>
+<body class="h-full bg-gray-50 dark:bg-gray-900 text-gray-800 dark:text-gray-100"
+      x-data="AppLayout()" x-init="init()" @keydown.escape="sidebarOpen=false">
+
+    <!-- Mobile Overlay -->
+    <div x-show="sidebarOpen" x-transition.opacity @click="sidebarOpen=false"
+         class="fixed inset-0 bg-black/50 z-30 lg:hidden"></div>
+
+    <div class="flex h-full">
+        <!-- Sidebar -->
+        <aside id="sidebar"
+               :class="{'collapsed': sidebarCollapsed, 'open': sidebarOpen}"
+               class="fixed lg:relative inset-y-0 left-0 z-40 bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex flex-col transition-all duration-300 h-full"
+               @click.away="sidebarOpen=false">
+
+            <!-- Logo -->
+            <div class="h-16 flex items-center px-4 border-b border-gray-200 dark:border-gray-700">
+                <a href="/dashboard" class="flex items-center gap-3" :class="{'justify-center w-full': sidebarCollapsed}">
+                    <div class="w-8 h-8 bg-primary rounded-lg flex items-center justify-center flex-shrink-0">
+                        <i class="fas fa-chart-line text-white text-sm"></i>
+                    </div>
+                    <span x-show="!sidebarCollapsed" class="font-bold text-lg dark:text-white">Invest</span>
+                </a>
+            </div>
+
+            <!-- Nav -->
+            <nav class="flex-1 py-4 px-3 space-y-1 overflow-y-auto">
+                <a href="/dashboard"
+                   class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors"
+                   :class="isCurrentPath('/dashboard') ? 'bg-primary/10 text-primary font-medium' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'">
+                    <i class="fas fa-terminal w-5 text-center"></i>
+                    <span x-show="!sidebarCollapsed">分析终端</span>
+                </a>
+                <a href="/users" x-show="currentUser?.role==='admin'"
+                   class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors"
+                   :class="isCurrentPath('/users') ? 'bg-primary/10 text-primary font-medium' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'">
+                    <i class="fas fa-users w-5 text-center"></i>
+                    <span x-show="!sidebarCollapsed">用户管理</span>
+                </a>
+            </nav>
+
+            <!-- Bottom -->
+            <div class="p-3 border-t border-gray-200 dark:border-gray-700 space-y-2">
+                <button @click="sidebarCollapsed=!sidebarCollapsed"
+                        class="hidden lg:flex w-full items-center justify-center p-2 rounded-lg text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700">
+                    <i class="fas" :class="sidebarCollapsed?'fa-angle-right':'fa-angle-left'"></i>
+                </button>
+                <button @click="logout()"
+                        class="w-full flex items-center px-3 py-2 rounded-lg text-sm text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700"
+                        :class="{'justify-center': sidebarCollapsed}">
+                    <i class="fas fa-sign-out-alt w-5 text-center" :class="{'mr-3': !sidebarCollapsed}"></i>
+                    <span x-show="!sidebarCollapsed">退出登录</span>
+                </button>
+            </div>
+        </aside>
+
+        <!-- Main -->
+        <div class="flex-1 flex flex-col min-w-0">
+            <!-- Header -->
+            <header class="h-16 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-4 lg:px-6 flex items-center justify-between sticky top-0 z-20">
+                <div class="flex items-center gap-4">
+                    <button @click="sidebarOpen=true" class="lg:hidden p-2 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg">
+                        <i class="fas fa-bars"></i>
+                    </button>
+                    <button @click="sidebarCollapsed=!sidebarCollapsed" class="hidden lg:block p-2 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg">
+                        <i class="fas fa-bars"></i>
+                    </button>
+                </div>
+                <div class="flex items-center gap-3">
+                    <button @click="toggleTheme()" class="p-2 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg">
+                        <i class="fas" :class="isDark?'fa-sun text-yellow-500':'fa-moon'"></i>
+                    </button>
+                    <div class="flex items-center gap-2 pl-3 border-l border-gray-200 dark:border-gray-700">
+                        <div class="w-8 h-8 bg-primary/10 rounded-full flex items-center justify-center">
+                            <i class="fas fa-user text-primary text-sm"></i>
+                        </div>
+                        <span class="hidden sm:block text-sm dark:text-gray-300" x-text="currentUser?.username||'用户'"></span>
+                    </div>
+                </div>
+            </header>
+
+            <!-- Page Content -->
+            <main class="flex-1 overflow-y-auto">
+                {{template "page" .}}
+            </main>
+        </div>
+    </div>
+
+    <div id="toast-container" role="status" aria-live="polite"></div>
+    <script src="/static/js/common.js"></script>
+</body>
+</html>
+{{end}}
