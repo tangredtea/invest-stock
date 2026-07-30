@@ -108,3 +108,75 @@ func TestProperty22_LeadingZeroFill(t *testing.T) {
 		t.Errorf("leading positions must be zero-filled: %v", err)
 	}
 }
+
+func TestProperty23_AtEqualsComputeAll(t *testing.T) {
+	f := func(ps priceSeries) bool {
+		closes := []float64(ps)
+		series := ComputeSeries(closes)
+		for i := range closes {
+			if At(series, i) != ComputeAll(closes, i) {
+				return false
+			}
+		}
+		return true
+	}
+	if err := quick.Check(f, &quick.Config{MaxCount: 100}); err != nil {
+		t.Errorf("At must equal ComputeAll field-for-field: %v", err)
+	}
+}
+
+func TestComputeAllHandlesOutOfRangeIndex(t *testing.T) {
+	tests := []struct {
+		name   string
+		closes []float64
+		index  int
+	}{
+		{name: "empty", closes: nil, index: 0},
+		{name: "negative index", closes: []float64{1, 2, 3}, index: -1},
+		{name: "too large", closes: []float64{1, 2, 3}, index: 3},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ComputeAll(tt.closes, tt.index); got != (Indicators{}) {
+				t.Fatalf("ComputeAll = %+v, want zero Indicators", got)
+			}
+		})
+	}
+}
+
+func TestAtHandlesOutOfRangeIndex(t *testing.T) {
+	series := ComputeSeries([]float64{1, 2, 3})
+	for _, index := range []int{-1, 3} {
+		if got := At(series, index); got != (Indicators{}) {
+			t.Fatalf("At index %d = %+v, want zero Indicators", index, got)
+		}
+	}
+}
+
+func TestIndicatorsHandleNonPositivePeriods(t *testing.T) {
+	closes := []float64{1, 2, 3, 4, 5}
+	if got := SMA(closes, 0); len(got) != len(closes) {
+		t.Fatalf("SMA length = %d, want %d", len(got), len(closes))
+	}
+	if got := RSI(closes, -1); len(got) != len(closes) {
+		t.Fatalf("RSI length = %d, want %d", len(got), len(closes))
+	}
+	if got := EMA(closes, 0); len(got) != len(closes) {
+		t.Fatalf("EMA length = %d, want %d", len(got), len(closes))
+	}
+	ml, sl, hist := MACD(closes, 0, 26, 9)
+	if len(ml) != len(closes) || len(sl) != len(closes) || len(hist) != len(closes) {
+		t.Fatalf("MACD lengths = %d/%d/%d, want %d", len(ml), len(sl), len(hist), len(closes))
+	}
+	up, mid, low := BollingerBands(closes, 0, 2)
+	if len(up) != len(closes) || len(mid) != len(closes) || len(low) != len(closes) {
+		t.Fatalf("Bollinger lengths = %d/%d/%d, want %d", len(up), len(mid), len(low), len(closes))
+	}
+	for _, series := range [][]float64{SMA(closes, 0), RSI(closes, -1), EMA(closes, 0), ml, sl, hist, up, mid, low} {
+		for _, v := range series {
+			if v != 0 {
+				t.Fatalf("invalid-period output contains non-zero value: %v", series)
+			}
+		}
+	}
+}

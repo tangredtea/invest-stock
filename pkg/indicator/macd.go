@@ -4,7 +4,7 @@ package indicator
 func EMA(closes []float64, period int) []float64 {
 	n := len(closes)
 	out := make([]float64, n)
-	if n == 0 {
+	if period <= 0 || n == 0 {
 		return out
 	}
 	k := 2.0 / float64(period+1)
@@ -17,9 +17,12 @@ func EMA(closes []float64, period int) []float64 {
 
 // MACD returns macd line, signal line, and histogram.
 func MACD(closes []float64, fast, slow, signal int) (macdLine, signalLine, hist []float64) {
+	n := len(closes)
+	if fast <= 0 || slow <= 0 || signal <= 0 {
+		return make([]float64, n), make([]float64, n), make([]float64, n)
+	}
 	emaFast := EMA(closes, fast)
 	emaSlow := EMA(closes, slow)
-	n := len(closes)
 	macdLine = make([]float64, n)
 	for i := range macdLine {
 		macdLine[i] = emaFast[i] - emaSlow[i]

@@ -7,7 +7,7 @@ import "math"
 func RSI(closes []float64, period int) []float64 {
 	n := len(closes)
 	out := make([]float64, n)
-	if n <= period {
+	if period <= 0 || n <= period {
 		return out
 	}
 

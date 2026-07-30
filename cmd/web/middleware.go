@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 
@@ -22,19 +23,18 @@ func requireAuth(jwtMgr *auth.JWTManager, next http.HandlerFunc) http.HandlerFun
 			tokenStr = h[7:]
 		}
 
-		// Fallback to query param (for WebSocket)
 		if tokenStr == "" {
-			tokenStr = r.URL.Query().Get("token")
-		}
-
-		if tokenStr == "" {
-			http.Error(w, `{"code":401,"message":"未登录"}`, http.StatusUnauthorized)
+			writeJSON(w, http.StatusUnauthorized, jsonResp{Code: http.StatusUnauthorized, Message: "未登录"})
 			return
 		}
 
 		claims, err := jwtMgr.Parse(tokenStr)
 		if err != nil {
-			http.Error(w, `{"code":401,"message":"登录已过期"}`, http.StatusUnauthorized)
+			msg := "认证失败"
+			if errors.Is(err, auth.ErrExpiredToken) {
+				msg = "登录已过期"
+			}
+			writeJSON(w, http.StatusUnauthorized, jsonResp{Code: http.StatusUnauthorized, Message: msg})
 			return
 		}
 
@@ -48,7 +48,7 @@ func requireAdmin(jwtMgr *auth.JWTManager, next http.HandlerFunc) http.HandlerFu
 	return requireAuth(jwtMgr, func(w http.ResponseWriter, r *http.Request) {
 		claims := r.Context().Value(claimsKey).(*auth.Claims)
 		if claims.Role != "admin" {
-			http.Error(w, `{"code":403,"message":"需要管理员权限"}`, http.StatusForbidden)
+			writeJSON(w, http.StatusForbidden, jsonResp{Code: http.StatusForbidden, Message: "需要管理员权限"})
 			return
 		}
 		next(w, r)

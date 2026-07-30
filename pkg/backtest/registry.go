@@ -39,12 +39,19 @@ func (r *Registry) Register(name string, specs []ParamSpec, ctor Constructor) er
 	if strings.TrimSpace(name) == "" {
 		return fmt.Errorf("策略名称不能为空")
 	}
+	if ctor == nil {
+		return fmt.Errorf("策略构造器不能为空")
+	}
+	specsCopy, err := cloneAndValidateSpecs(specs)
+	if err != nil {
+		return err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if _, exists := r.entries[name]; exists {
 		return fmt.Errorf("策略名称已被占用: %q", name)
 	}
-	r.entries[name] = regEntry{specs: specs, ctor: ctor}
+	r.entries[name] = regEntry{specs: specsCopy, ctor: ctor}
 	return nil
 }
 
@@ -71,7 +78,7 @@ func (r *Registry) Info(name string) (StrategyInfo, error) {
 	if !ok {
 		return StrategyInfo{}, fmt.Errorf("策略未注册: %q", name)
 	}
-	return StrategyInfo{Name: name, Params: entry.specs}, nil
+	return StrategyInfo{Name: name, Params: cloneSpecs(entry.specs)}, nil
 }
 
 // List returns all registered strategies sorted by name (Requirement 2.5);
@@ -81,7 +88,7 @@ func (r *Registry) List() []StrategyInfo {
 	defer r.mu.RUnlock()
 	out := make([]StrategyInfo, 0, len(r.entries))
 	for name, entry := range r.entries {
-		out = append(out, StrategyInfo{Name: name, Params: entry.specs})
+		out = append(out, StrategyInfo{Name: name, Params: cloneSpecs(entry.specs)})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out

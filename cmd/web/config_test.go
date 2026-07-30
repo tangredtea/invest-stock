@@ -91,6 +91,57 @@ func TestLoadConfigSeedsWhenAdminValid(t *testing.T) {
 	}
 }
 
+func TestLoadConfigTrimsEnvironmentValues(t *testing.T) {
+	secret := strings.Repeat("s", 40)
+	t.Setenv("INVEST_JWT_SECRET", " \n"+secret+"\t ")
+	t.Setenv("INVEST_ADDR", " \t:9090\n")
+	t.Setenv("INVEST_ADMIN_USERNAME", " admin ")
+	t.Setenv("INVEST_ADMIN_PASSWORD", "\tstrongpass\n")
+	t.Setenv("INVEST_KLINE_TTL", " 2h ")
+
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.JWTSecret != secret {
+		t.Errorf("expected trimmed JWT secret %q, got %q", secret, cfg.JWTSecret)
+	}
+	if cfg.Addr != ":9090" {
+		t.Errorf("expected trimmed addr :9090, got %q", cfg.Addr)
+	}
+	if cfg.KLineTTL != 2*time.Hour {
+		t.Errorf("expected trimmed TTL 2h, got %v", cfg.KLineTTL)
+	}
+	if !cfg.SeedAdmin {
+		t.Fatal("expected trimmed admin credentials to be valid")
+	}
+	if cfg.AdminUsername != "admin" {
+		t.Errorf("expected trimmed admin username, got %q", cfg.AdminUsername)
+	}
+	if cfg.AdminPassword != "strongpass" {
+		t.Errorf("expected trimmed admin password, got %q", cfg.AdminPassword)
+	}
+}
+
+func TestLoadConfigRejectsPaddedInsecureDefaultSecret(t *testing.T) {
+	t.Setenv("INVEST_JWT_SECRET", " invest-secret-key-2024 ")
+	if _, err := LoadConfig(); err == nil {
+		t.Fatal("expected fatal error when padded JWT secret is a known insecure default")
+	}
+}
+
+func TestLoadConfigWhitespaceAddrFallsBackToDefault(t *testing.T) {
+	t.Setenv("INVEST_JWT_SECRET", strings.Repeat("s", 40))
+	t.Setenv("INVEST_ADDR", " \t\n")
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Addr != defaultAddr {
+		t.Errorf("expected default addr %q, got %q", defaultAddr, cfg.Addr)
+	}
+}
+
 func TestParseKLineTTLClampingAndDefault(t *testing.T) {
 	if got := parseKLineTTL(""); got != defaultKLineTTL {
 		t.Errorf("empty TTL should default to 24h, got %v", got)

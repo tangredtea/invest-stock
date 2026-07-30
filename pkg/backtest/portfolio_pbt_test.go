@@ -41,6 +41,58 @@ func (multiKlineInput) Generate(r *rand.Rand, _ int) reflect.Value {
 	return reflect.ValueOf(multiKlineInput(out))
 }
 
+func TestAlignRejectsInvalidKLines(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(map[string][]data.KLine)
+	}{
+		{
+			name: "nan close",
+			mutate: func(input map[string][]data.KLine) {
+				input["600000"][10].Close = math.Inf(1)
+			},
+		},
+		{
+			name: "negative volume",
+			mutate: func(input map[string][]data.KLine) {
+				input["600000"][10].Volume = -1
+			},
+		},
+		{
+			name: "low above open",
+			mutate: func(input map[string][]data.KLine) {
+				input["600000"][10].Low = input["600000"][10].Open + 0.01
+			},
+		},
+		{
+			name: "duplicate date",
+			mutate: func(input map[string][]data.KLine) {
+				input["600000"][10].Date = input["600000"][9].Date
+			},
+		},
+		{
+			name: "same day overwrites alignment key",
+			mutate: func(input map[string][]data.KLine) {
+				input["600000"][10].Date = input["600000"][9].Date.Add(12 * time.Hour)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			input := map[string][]data.KLine{
+				"600000": genSymbolKlines(80, 0),
+				"600001": genSymbolKlines(80, 1.5),
+			}
+			tt.mutate(input)
+
+			if _, err := Align(input, AlignIntersection); err == nil {
+				t.Fatalf("Align accepted invalid KLines")
+			}
+		})
+	}
+}
+
 // Feature: portfolio-backtest-risk, Property 1: 对任意 2..1000 标的合法输入与任意合法
 // AlignmentPolicy,统一时间轴严格升序无重复,且每标的对齐价格点数 = 时间轴长度。
 func TestProperty1_AlignStructure(t *testing.T) {

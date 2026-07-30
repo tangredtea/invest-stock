@@ -13,6 +13,14 @@
   }
 
   function el(id) { return document.getElementById(id); }
+  function esc(v) {
+    return String(v == null ? '' : v)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
 
   // postJSON sends a POST with a 30s timeout (Requirement 18.7).
   async function postJSON(url, body) {
@@ -135,7 +143,7 @@
     rows.forEach(([k, v]) => {
       const d = document.createElement('div');
       d.className = 'bt-metric';
-      d.innerHTML = '<span>' + k + '</span><b>' + v + '</b>';
+      d.innerHTML = '<span>' + esc(k) + '</span><b>' + esc(v) + '</b>';
       box.appendChild(d);
     });
   }
@@ -154,9 +162,9 @@
     trades.forEach(t => {
       const date = (t.date || '').slice(0, 10);
       const dir = t.action === 'buy' ? '买入' : '卖出';
-      html += '<tr><td>' + date + '</td><td>' + dir + '</td><td>' +
-        t.price.toFixed(3) + '</td><td>' + t.qty + '</td><td>' +
-        t.costTotal.toFixed(2) + '</td></tr>';
+      html += '<tr><td>' + esc(date) + '</td><td>' + esc(dir) + '</td><td>' +
+        esc(t.price.toFixed(3)) + '</td><td>' + esc(t.qty) + '</td><td>' +
+        esc(t.costTotal.toFixed(2)) + '</td></tr>';
     });
     html += '</tbody></table>';
     box.innerHTML = html;
@@ -171,9 +179,9 @@
       '<th>策略</th><th>总收益</th><th>年化</th><th>回撤</th><th>夏普</th><th>交易</th></tr></thead><tbody>';
     results.forEach(r => {
       const m = r.metrics;
-      html += '<tr><td>' + r.strategyName + '</td><td>' + fmtPct(m.totalReturn) +
-        '</td><td>' + fmtPct(m.annualReturn) + '</td><td>' + fmtPct(m.maxDrawdown) +
-        '</td><td>' + m.sharpe.toFixed(2) + '</td><td>' + m.totalTrades + '</td></tr>';
+      html += '<tr><td>' + esc(r.strategyName) + '</td><td>' + esc(fmtPct(m.totalReturn)) +
+        '</td><td>' + esc(fmtPct(m.annualReturn)) + '</td><td>' + esc(fmtPct(m.maxDrawdown)) +
+        '</td><td>' + esc(m.sharpe.toFixed(2)) + '</td><td>' + esc(m.totalTrades) + '</td></tr>';
     });
     html += '</tbody></table>';
     box.innerHTML = html;

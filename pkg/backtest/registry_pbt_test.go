@@ -2,6 +2,7 @@ package backtest
 
 import (
 	"fmt"
+	"math"
 	"testing"
 	"testing/quick"
 )
@@ -10,12 +11,74 @@ import (
 type stubStrategy struct{ name string }
 
 func (s stubStrategy) Name() string             { return s.name }
-func (s stubStrategy) Params() []ParamSpec       { return nil }
-func (s stubStrategy) MinBars() int              { return 60 }
-func (s stubStrategy) Decide(*Context) Decision  { return HoldDecision() }
+func (s stubStrategy) Params() []ParamSpec      { return nil }
+func (s stubStrategy) MinBars() int             { return 60 }
+func (s stubStrategy) Decide(*Context) Decision { return HoldDecision() }
 
 func stubCtor(name string) Constructor {
 	return func(map[string]ParamValue) (Strategy, error) { return stubStrategy{name: name}, nil }
+}
+
+func TestRegistryRejectsInvalidSpecsAndNilConstructor(t *testing.T) {
+	r := NewRegistry()
+	if err := r.Register("nil-ctor", nil, nil); err == nil {
+		t.Fatal("expected nil constructor to be rejected")
+	}
+
+	cases := []struct {
+		name  string
+		specs []ParamSpec
+	}{
+		{"duplicate spec", []ParamSpec{
+			{Name: "n", Type: ParamInt, Default: IntVal(1), Min: 0, Max: 10},
+			{Name: "n", Type: ParamInt, Default: IntVal(2), Min: 0, Max: 10},
+		}},
+		{"blank spec name", []ParamSpec{{Name: " ", Type: ParamInt, Default: IntVal(1), Min: 0, Max: 10}}},
+		{"default type mismatch", []ParamSpec{{Name: "n", Type: ParamInt, Default: FloatVal(1), Min: 0, Max: 10}}},
+		{"non finite min", []ParamSpec{{Name: "x", Type: ParamFloat, Default: FloatVal(1), Min: math.NaN(), Max: 10}}},
+		{"default out of range", []ParamSpec{{Name: "x", Type: ParamFloat, Default: FloatVal(11), Min: 0, Max: 10}}},
+		{"empty enum", []ParamSpec{{Name: "e", Type: ParamEnum, Default: EnumVal("a")}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := r.Register(tc.name, tc.specs, stubCtor(tc.name)); err == nil {
+				t.Fatal("expected invalid spec to be rejected")
+			}
+		})
+	}
+}
+
+func TestRegistryClonesSpecs(t *testing.T) {
+	r := NewRegistry()
+	specs := []ParamSpec{{Name: "e", Type: ParamEnum, Default: EnumVal("a"), Enum: []string{"a", "b"}}}
+	if err := r.Register("s", specs, stubCtor("s")); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+
+	specs[0].Enum[0] = "mutated"
+	info, err := r.Info("s")
+	if err != nil {
+		t.Fatalf("info: %v", err)
+	}
+	if info.Params[0].Enum[0] != "a" {
+		t.Fatalf("registry retained caller slice alias: %+v", info.Params[0].Enum)
+	}
+
+	info.Params[0].Enum[0] = "mutated-again"
+	info2, _ := r.Info("s")
+	if info2.Params[0].Enum[0] != "a" {
+		t.Fatalf("Info returned mutable internal slice: %+v", info2.Params[0].Enum)
+	}
+}
+
+func TestApplyDefaultsRejectsNonFiniteFloat(t *testing.T) {
+	specs := []ParamSpec{{Name: "x", Type: ParamFloat, Default: FloatVal(1), Min: 0, Max: 10}}
+	if _, err := ApplyDefaults(specs, map[string]ParamValue{"x": FloatVal(math.NaN())}); err == nil {
+		t.Fatal("expected NaN float param to be rejected")
+	}
+	if _, err := ApplyDefaults(specs, map[string]ParamValue{"x": FloatVal(math.Inf(1))}); err == nil {
+		t.Fatal("expected Inf float param to be rejected")
+	}
 }
 
 // Feature: quant-backtest-platform, Property 6: 对任意由唯一且非空名称构成的策略集合,逐一注册后:

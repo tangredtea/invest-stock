@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"errors"
 	"math/rand"
 	"testing"
 	"testing/quick"
@@ -71,7 +72,8 @@ func TestProperty1_AlgorithmAndSignatureValidation(t *testing.T) {
 		t.Errorf(`"none" algorithm must be rejected: %v`, err)
 	}
 
-	// 1d. Expired HMAC tokens (correct secret) must be rejected.
+	// 1d. Expired HMAC tokens (correct secret) must be rejected with the
+	// dedicated expired-token error.
 	expired := func(uid int64, usr, role string) bool {
 		tok := jwt.NewWithClaims(jwt.SigningMethodHS256, makeClaims(uid, usr, role, -time.Hour))
 		signed, err := tok.SignedString([]byte(secret))
@@ -79,7 +81,7 @@ func TestProperty1_AlgorithmAndSignatureValidation(t *testing.T) {
 			return true
 		}
 		claims, err := mgr.Parse(signed)
-		return err == ErrInvalidToken && claims == nil
+		return errors.Is(err, ErrExpiredToken) && claims == nil
 	}
 	if err := quick.Check(expired, &quick.Config{MaxCount: 100}); err != nil {
 		t.Errorf("expired token must be rejected: %v", err)

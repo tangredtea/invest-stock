@@ -8,44 +8,9 @@ import (
 	"invest/pkg/data"
 )
 
-// AlignmentPolicy selects how multiple symbols' K线 series are aligned onto a
-// unified timeline (Requirements 1.2, 1.3, 1.10).
-type AlignmentPolicy int
-
-const (
-	AlignIntersection AlignmentPolicy = iota // intersection of trading days
-	AlignUnionFFill                          // union + forward-fill
-)
-
-const (
-	minPortfolioSymbols = 2
-	maxPortfolioSymbols = 1000
-)
-
-// PricePoint is a symbol's aligned price state at one timeline point
-// (Requirements 1.2, 1.3, 1.4).
-type PricePoint struct {
-	Open      float64 `json:"open"`
-	High      float64 `json:"high"`
-	Low       float64 `json:"low"`
-	Close     float64 `json:"close"` // forward-filled to last valid close when Suspended
-	Valid     bool    `json:"valid"` // true => tradable at this point
-	Suspended bool    `json:"suspended"`
-	Missing   bool    `json:"missing"`
-}
-
-// AlignedData is the result of aligning multiple symbols (Requirement 1).
-type AlignedData struct {
-	Symbols  []string                // stable sorted order (determinism)
-	Timeline []time.Time             // strictly ascending, no duplicates
-	Points   map[string][]PricePoint // each symbol: len == len(Timeline)
-	Raw      map[string][]data.KLine // validated raw input (for indicator windows)
-}
-
 // dayKey truncates a timestamp to its calendar day (alignment key).
 func dayKey(t time.Time) time.Time {
-	y, m, d := t.Date()
-	return time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
+	return data.DayKey(t)
 }
 
 // Align validates and aligns multiple symbols' K线 series onto a unified
@@ -68,13 +33,11 @@ func Align(input map[string][]data.KLine, policy AlignmentPolicy) (AlignedData, 
 	}
 	sort.Strings(symbols)
 
-	// Requirement 1.8, 1.9: each symbol's dates strictly ascending, no duplicates.
+	// Requirement 1.8, 1.9: each symbol's daily bars are valid, strictly
+	// ascending, and unique on the day key used by alignment.
 	for _, sym := range symbols {
-		ks := input[sym]
-		for i := 1; i < len(ks); i++ {
-			if !ks[i].Date.After(ks[i-1].Date) {
-				return AlignedData{}, fmt.Errorf("标的 %s 的 K线日期非严格升序或重复, 首个出错位置: %d", sym, i)
-			}
+		if err := data.ValidateDailyKLines(fmt.Sprintf("标的 %s 的 K线", sym), input[sym]); err != nil {
+			return AlignedData{}, err
 		}
 	}
 

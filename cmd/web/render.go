@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"html/template"
 	"io/fs"
 	"net/http"
@@ -50,8 +51,6 @@ func (r *Renderer) Render(w http.ResponseWriter, name string, data any) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-
 	// Determine the root template name based on layout
 	root := "base"
 	switch name {
@@ -59,7 +58,12 @@ func (r *Renderer) Render(w http.ResponseWriter, name string, data any) {
 		root = "layout"
 	}
 
-	if err := t.ExecuteTemplate(w, root, data); err != nil {
+	var buf bytes.Buffer
+	if err := t.ExecuteTemplate(&buf, root, data); err != nil {
 		http.Error(w, err.Error(), 500)
+		return
 	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(buf.Bytes())
 }

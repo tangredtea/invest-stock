@@ -4,34 +4,32 @@ import (
 	"fmt"
 	"os"
 
-	"invest/pkg/data"
-	"invest/pkg/indicator"
+	"invest/internal/analysis"
+	"invest/internal/cli"
+	"invest/internal/market"
 )
 
 func main() {
-	const secid = "1.513630"
-	fmt.Println("正在从东方财富获取513630数据...")
-	klines, err := data.FetchKLines(secid)
+	target := market.DefaultSecurity
+	fmt.Printf("正在从东方财富获取%s数据...\n", target.Code)
+	klines, err := cli.FetchKLines(target.SecID)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "获取K线失败: %v\n", err)
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	quote, err := cli.FetchQuote(target.SecID)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+	}
+
+	snapshot, err := analysis.RequireLatestIndicators(klines)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 
-	quote, err := data.FetchQuote(secid)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "获取实时行情失败: %v\n", err)
-	}
-
-	closes := make([]float64, len(klines))
-	for i, k := range klines {
-		closes[i] = k.Close
-	}
-	last := len(closes) - 1
-	ind := indicator.ComputeAll(closes, last)
-	prevInd := indicator.ComputeAll(closes, last-1)
-
 	printHeader(klines, quote)
-	printIndicators(ind)
-	printSignal(closes[last], ind, prevInd.MACDHist, quote)
+	printIndicators(snapshot.Current)
+	printSignal(analysis.DefaultCompositeSignal(snapshot, quote))
 	printBacktest(klines)
 }

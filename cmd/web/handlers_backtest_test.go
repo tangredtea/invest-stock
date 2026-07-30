@@ -2,42 +2,16 @@ package main
 
 import (
 	"encoding/json"
-	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
 	"invest/pkg/backtest"
-	"invest/pkg/data"
 )
 
-// seedBacktestData preloads the cache with a deterministic kline series for the
-// given code's secid so the backtest handlers don't hit the network.
-func seedBacktestData(t *testing.T, code string, n int) {
-	t.Helper()
-	secid := resolveSecID(code)
-	if secid == "" {
-		t.Fatalf("bad code %q", code)
-	}
-	base := time.Date(2023, 1, 2, 0, 0, 0, 0, time.UTC)
-	klines := make([]data.KLine, n)
-	for i := 0; i < n; i++ {
-		price := 10 + 2*math.Sin(float64(i)/7)
-		klines[i] = data.KLine{
-			Date: base.AddDate(0, 0, i), Open: price, High: price + 0.3,
-			Low: price - 0.3, Close: price, Volume: 1000,
-		}
-	}
-	data.SeedKLineCache(secid, klines)
-}
-
 func postBacktest(body string) *httptest.ResponseRecorder {
-	req := httptest.NewRequest(http.MethodPost, "/api/backtest", strings.NewReader(body))
-	rec := httptest.NewRecorder()
-	handleBacktest(rec, req)
-	return rec
+	return postTestJSON("/api/backtest", body, handleBacktest)
 }
 
 func TestHandleBacktestSuccess(t *testing.T) {
@@ -53,9 +27,7 @@ func TestHandleBacktestSuccess(t *testing.T) {
 		Code int             `json:"code"`
 		Data backtest.Result `json:"data"`
 	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
+	decodeTestResponse(t, rec, &resp)
 	if len(resp.Data.Equity) == 0 || len(resp.Data.Drawdown) == 0 {
 		t.Errorf("expected equity/drawdown curves in result")
 	}
@@ -87,6 +59,30 @@ func TestHandleBacktestInvalidConfig(t *testing.T) {
 	}
 }
 
+func TestHandleBacktestRejectsInvalidFillRule(t *testing.T) {
+	seedBacktestData(t, "600519", 200)
+	rec := postBacktest(`{"code":"600519","strategy":"买入持有(基准)","config":{"fillRule":99}}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+}
+
+func TestHandleBacktestAcceptsTickSlippageConfig(t *testing.T) {
+	seedBacktestData(t, "600519", 200)
+	rec := postBacktest(`{"code":"600519","strategy":"买入持有(基准)","config":{"slippageMode":1,"tick":0.01,"slippageTicks":2}}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHandleBacktestRejectsUnknownRequestFields(t *testing.T) {
+	seedBacktestData(t, "600519", 200)
+	rec := postBacktest(`{"code":"600519","strategy":"买入持有(基准)","unexpected":true}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+}
+
 func TestHandleBacktestCompareNineBuiltins(t *testing.T) {
 	// Requirement 15.5: comparing all 9 builtins returns 9 results.
 	seedBacktestData(t, "600519", 200)
@@ -101,18 +97,14 @@ func TestHandleBacktestCompareNineBuiltins(t *testing.T) {
 	}
 	sb.WriteString(`]}`)
 
-	req := httptest.NewRequest(http.MethodPost, "/api/backtest/compare", strings.NewReader(sb.String()))
-	rec := httptest.NewRecorder()
-	handleBacktestCompare(rec, req)
+	rec := postTestJSON("/api/backtest/compare", sb.String(), handleBacktestCompare)
 	if rec.Code != 200 {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 	var resp struct {
 		Data []backtest.Result `json:"data"`
 	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
+	decodeTestResponse(t, rec, &resp)
 	if len(resp.Data) != 9 {
 		t.Errorf("expected 9 results, got %d", len(resp.Data))
 	}
@@ -130,9 +122,7 @@ func TestHandleBacktestCompareTooMany(t *testing.T) {
 		sb.WriteString(`{"strategy":"买入持有(基准)"}`)
 	}
 	sb.WriteString(`]}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/backtest/compare", strings.NewReader(sb.String()))
-	rec := httptest.NewRecorder()
-	handleBacktestCompare(rec, req)
+	rec := postTestJSON("/api/backtest/compare", sb.String(), handleBacktestCompare)
 	if rec.Code != 400 {
 		t.Errorf("expected 400 for >50 combinations, got %d", rec.Code)
 	}

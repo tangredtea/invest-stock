@@ -110,6 +110,20 @@ func TestCalculateRejectsNonPositiveInitial(t *testing.T) {
 	}
 }
 
+func TestCalculateHandlesShortDates(t *testing.T) {
+	eq := []float64{100, 120, 90}
+	m, err := Calculate(eq, datesFor(1), nil, 100, 2, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.MaxDrawdown <= 0 {
+		t.Fatalf("MaxDrawdown = %v, want positive drawdown", m.MaxDrawdown)
+	}
+	if !m.MaxDDPeakDate.IsZero() || !m.MaxDDTroughDate.IsZero() {
+		t.Fatalf("drawdown dates = (%v, %v), want zero values for mismatched dates", m.MaxDDPeakDate, m.MaxDDTroughDate)
+	}
+}
+
 // TestCalmarEqualsAnnualOverMDD verifies the Calmar identity on a known case.
 func TestCalmarEqualsAnnualOverMDD(t *testing.T) {
 	// equity rises then falls to create a known drawdown.

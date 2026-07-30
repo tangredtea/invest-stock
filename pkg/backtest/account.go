@@ -65,8 +65,6 @@ func (a *account) addLot(qty, buyIdx int, fillPrice, buyCost float64) {
 // of the sold shares. Caller must ensure qty <= sellable(curIdx, tPlus1).
 func (a *account) sellFIFO(qty, curIdx int, tPlus1 bool) (costBasis float64) {
 	remaining := qty
-	newLots := a.lots[:0]
-	// Build a fresh slice to avoid aliasing issues while iterating.
 	kept := make([]lot, 0, len(a.lots))
 	for _, l := range a.lots {
 		if remaining == 0 || (tPlus1 && l.buyIdx >= curIdx) {
@@ -87,7 +85,6 @@ func (a *account) sellFIFO(qty, curIdx int, tPlus1 bool) (costBasis float64) {
 			kept = append(kept, l)
 		}
 	}
-	_ = newLots
 	a.lots = kept
 	return costBasis
 }

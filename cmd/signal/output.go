@@ -2,76 +2,90 @@ package main
 
 import (
 	"fmt"
+	"io"
+	"os"
 
+	"invest/internal/market"
 	"invest/pkg/data"
 	"invest/pkg/indicator"
 	"invest/pkg/strategy"
 )
 
 func printHeader(klines []data.KLine, q data.Quote) {
+	printHeaderTo(os.Stdout, klines, q)
+}
+
+func printHeaderTo(w io.Writer, klines []data.KLine, q data.Quote) {
 	last := klines[len(klines)-1]
-	fmt.Println("═══════════════════════════════════════════════════")
-	fmt.Printf("  513630 港股低波红利ETF  %s\n", last.Date.Format("2006-01-02"))
-	fmt.Println("═══════════════════════════════════════════════════")
-	if q.Price > 0 {
+	target := market.DefaultSecurity
+	fmt.Fprintln(w, "═══════════════════════════════════════════════════")
+	fmt.Fprintf(w, "  %s %s  %s\n", target.Code, target.Name, last.Date.Format("2006-01-02"))
+	fmt.Fprintln(w, "═══════════════════════════════════════════════════")
+	if validQuoteForDisplay(q) {
 		chg := (q.Price - q.PreClose) / q.PreClose * 100
-		fmt.Printf("  实时: %.3f  涨跌: %+.2f%%\n", q.Price, chg)
-		fmt.Printf("  今开: %.3f  最高: %.3f  最低: %.3f  昨收: %.3f\n",
+		fmt.Fprintf(w, "  实时: %.3f  涨跌: %+.2f%%\n", q.Price, chg)
+		fmt.Fprintf(w, "  今开: %.3f  最高: %.3f  最低: %.3f  昨收: %.3f\n",
 			q.Open, q.High, q.Low, q.PreClose)
 	} else {
-		fmt.Printf("  收盘: %.3f\n", last.Close)
+		fmt.Fprintf(w, "  收盘: %.3f\n", last.Close)
 	}
-	fmt.Println()
+	fmt.Fprintln(w)
+}
+
+func validQuoteForDisplay(q data.Quote) bool {
+	return q.Price > 0 && q.PreClose > 0 && q.Open > 0 && q.High >= q.Price && q.High >= q.Open && q.Low > 0 && q.Low <= q.Price && q.Low <= q.Open
 }
 
 func printIndicators(ind indicator.Indicators) {
-	fmt.Println("【技术指标】")
-	fmt.Printf("  MA5:  %.4f  MA20: %.4f  MA60: %.4f\n", ind.MA5, ind.MA20, ind.MA60)
-	fmt.Printf("  RSI(14): %.2f\n", ind.RSI14)
-	fmt.Printf("  布林带: 上轨 %.4f | 中轨 %.4f | 下轨 %.4f\n",
-		ind.BollUpper, ind.BollMiddle, ind.BollLower)
-	fmt.Printf("  MACD:  DIF %.4f | DEA %.4f | 柱 %.4f\n",
-		ind.MACDLine, ind.MACDSignal, ind.MACDHist)
-	fmt.Println()
+	printIndicatorsTo(os.Stdout, ind)
 }
 
-func printSignal(price float64, ind indicator.Indicators, prevMacdHist float64, q data.Quote) {
-	holdings := 100000
-	qi := strategy.QuoteInfo{
-		Price: q.Price, High: q.High, Low: q.Low, PreClose: q.PreClose,
-	}
-	sig := strategy.Composite(
-		price, ind.MA5, ind.MA20, ind.MA60, ind.RSI14,
-		ind.BollUpper, ind.BollLower,
-		ind.MACDHist, prevMacdHist, holdings, qi,
-	)
+func printIndicatorsTo(w io.Writer, ind indicator.Indicators) {
+	fmt.Fprintln(w, "【技术指标】")
+	fmt.Fprintf(w, "  MA5:  %.4f  MA20: %.4f  MA60: %.4f\n", ind.MA5, ind.MA20, ind.MA60)
+	fmt.Fprintf(w, "  RSI(14): %.2f\n", ind.RSI14)
+	fmt.Fprintf(w, "  布林带: 上轨 %.4f | 中轨 %.4f | 下轨 %.4f\n",
+		ind.BollUpper, ind.BollMiddle, ind.BollLower)
+	fmt.Fprintf(w, "  MACD:  DIF %.4f | DEA %.4f | 柱 %.4f\n",
+		ind.MACDLine, ind.MACDSignal, ind.MACDHist)
+	fmt.Fprintln(w)
+}
 
-	fmt.Println("【定投信号】")
-	fmt.Printf("  趋势: %s | 定投建议: %s\n", sig.Trend, sig.DCASignal)
-	fmt.Println()
+func printSignal(sig strategy.SignalResult) {
+	printSignalTo(os.Stdout, sig)
+}
 
-	fmt.Println("【T+0操作建议】")
-	fmt.Printf("  方向: %s\n", sig.T0Dir)
+func printSignalTo(w io.Writer, sig strategy.SignalResult) {
+	fmt.Fprintln(w, "【定投信号】")
+	fmt.Fprintf(w, "  趋势: %s | 定投建议: %s\n", sig.Trend, sig.DCASignal)
+	fmt.Fprintln(w)
+
+	fmt.Fprintln(w, "【T+0操作建议】")
+	fmt.Fprintf(w, "  方向: %s\n", sig.T0Dir)
 	if sig.T0Shares > 0 {
-		fmt.Printf("  建议股数: %d 股 (底仓10%%)\n", sig.T0Shares)
+		fmt.Fprintf(w, "  建议股数: %d 股 (底仓10%%)\n", sig.T0Shares)
 		if sig.T0BuyPrice > 0 {
-			fmt.Printf("  参考买入: %.3f  卖出: %.3f\n", sig.T0BuyPrice, sig.T0SellPrice)
+			fmt.Fprintf(w, "  参考买入: %.3f  卖出: %.3f\n", sig.T0BuyPrice, sig.T0SellPrice)
 		}
 	}
-	fmt.Println("  指标依据:")
+	fmt.Fprintln(w, "  指标依据:")
 	for _, r := range sig.T0Reasons {
-		fmt.Printf("    · %s\n", r)
+		fmt.Fprintf(w, "    · %s\n", r)
 	}
-	fmt.Printf("  综合: %s\n", sig.Reason)
-	fmt.Println()
+	fmt.Fprintf(w, "  综合: %s\n", sig.Reason)
+	fmt.Fprintln(w)
 }
 
 func printBacktest(klines []data.KLine) {
-	fmt.Println("【回测对比(同等投入)】")
+	printBacktestTo(os.Stdout, klines)
+}
+
+func printBacktestTo(w io.Writer, klines []data.KLine) {
+	fmt.Fprintln(w, "【回测对比(同等投入)】")
 	sep := "─────────────────────────────────────────────────────────────────────────────────────────────────────────────────"
-	fmt.Println(sep)
+	fmt.Fprintln(w, sep)
 	for _, r := range strategy.RunBacktest(klines) {
-		fmt.Println(r)
+		fmt.Fprintln(w, r)
 	}
-	fmt.Println(sep)
+	fmt.Fprintln(w, sep)
 }

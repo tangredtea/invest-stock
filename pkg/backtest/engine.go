@@ -26,11 +26,10 @@ func (e Engine) Run(klines []data.KLine, s Strategy, cfg Config) (Result, error)
 		return Result{}, err
 	}
 
-	// 2. K线 time-series validation: strictly ascending, no duplicates (Requirement 5.10).
-	for i := 1; i < len(klines); i++ {
-		if !klines[i].Date.After(klines[i-1].Date) {
-			return Result{}, fmt.Errorf("K线时间序列无效: 第 %d 根日期非严格升序或重复", i)
-		}
+	// 2. K线 time-series validation: finite OHLCV and strictly ascending dates
+	// (Requirement 5.10).
+	if err := data.ValidateKLines("K线", klines); err != nil {
+		return Result{}, err
 	}
 
 	// 3. Date-range filtering (Requirements 6.3–6.6).
@@ -45,7 +44,7 @@ func (e Engine) Run(klines []data.KLine, s Strategy, cfg Config) (Result, error)
 		need = platformMinBars
 	}
 	if len(window) < need {
-		return Result{}, fmt.Errorf("K线数量不足: 实际 %d 根, 至少需要 %d 根", len(window), need)
+		return Result{}, fmt.Errorf("k线数量不足: 实际 %d 根, 至少需要 %d 根", len(window), need)
 	}
 
 	// 5. Indicator precompute, aligned with the window.
@@ -56,7 +55,7 @@ func (e Engine) Run(klines []data.KLine, s Strategy, cfg Config) (Result, error)
 	series := indicator.ComputeSeries(closes)
 
 	// 6. Event loop.
-	return e.runLoop(window, series, s, cfg), nil
+	return e.runLoop(window, series, s, cfg)
 }
 
 // filterByDate returns the sub-slice whose Date falls in the optional [start,end]
@@ -80,14 +79,10 @@ func filterByDate(klines []data.KLine, start, end *time.Time) []data.KLine {
 
 // runLoop drives the strategy bar by bar, matching fills per the Fill rule,
 // applying costs and T+1, recording trades and curves, then computing metrics.
-func (e Engine) runLoop(window []data.KLine, series indicator.Series, s Strategy, cfg Config) Result {
+func (e Engine) runLoop(window []data.KLine, series indicator.Series, s Strategy, cfg Config) (Result, error) {
 	n := len(window)
 	acc := newAccount(cfg.InitialCash)
-
-	equity := make([]float64, n)
-	drawdown := make([]float64, n)
-	netValue := make([]float64, n)
-	dates := make([]time.Time, n)
+	curves := newEngineCurves(n)
 	var unfilled []UnfilledOrder
 
 	peak := cfg.InitialCash
@@ -98,149 +93,16 @@ func (e Engine) runLoop(window []data.KLine, series indicator.Series, s Strategy
 			Cash: acc.cash, Shares: acc.shares(),
 		}
 		dec := s.Decide(ctx)
+		if err := validateDecision(dec); err != nil {
+			return Result{}, fmt.Errorf("第 %d 根 K线策略决策非法: %w", i, err)
+		}
 
 		if dec.Action != Hold {
 			e.execute(acc, &unfilled, window, i, dec, cfg)
 		}
 
-		// Mark-to-market at the current bar's close (Requirement 19.6).
-		price := window[i].Close
-		eq := acc.equity(price)
-		equity[i] = eq
-		dates[i] = window[i].Date
-		netValue[i] = eq / cfg.InitialCash
-		if eq > peak {
-			peak = eq
-		}
-		if peak > 0 {
-			drawdown[i] = (peak - eq) / peak
-			if drawdown[i] < 0 {
-				drawdown[i] = 0
-			}
-		}
+		peak = curves.record(i, window[i], acc, peak, cfg.InitialCash)
 	}
 
-	calendarDays := int(window[n-1].Date.Sub(window[0].Date).Hours() / 24)
-	metrics, _ := Calculate(equity, dates, acc.trades, cfg.InitialCash, calendarDays, cfg.RiskFreeRate)
-
-	return Result{
-		StrategyName: s.Name(),
-		Equity:       equity,
-		Drawdown:     drawdown,
-		NetValue:     netValue,
-		Dates:        dates,
-		Trades:       acc.trades,
-		Unfilled:     unfilled,
-		Metrics:      metrics,
-	}
-}
-
-// execute resolves a buy/sell decision into a fill (or an unfilled record),
-// applying Fill rule, slippage, costs, cash and T+1 constraints
-// (Requirements 5.3, 5.4, 6.7, 6.8, 7.6–7.10, 8.1, 8.2).
-func (e Engine) execute(acc *account, unfilled *[]UnfilledOrder, window []data.KLine, i int, dec Decision, cfg Config) {
-	// Determine the base (reference) price per Fill rule (Requirement 5.3).
-	var base float64
-	switch cfg.FillRule {
-	case FillNextOpen:
-		if i+1 >= len(window) {
-			// No next bar: abandon the fill (Requirement 5.4).
-			*unfilled = append(*unfilled, UnfilledOrder{
-				Date: window[i].Date, Action: dec.Action.String(), Reason: "no_next_bar",
-			})
-			return
-		}
-		base = window[i+1].Open
-	default: // FillClose
-		base = window[i].Close
-	}
-	if base <= 0 {
-		return
-	}
-
-	fillPrice := cfg.Cost.FillPrice(base, dec.Action)
-	if fillPrice <= 0 {
-		return
-	}
-
-	switch dec.Action {
-	case Buy:
-		e.executeBuy(acc, unfilled, window, i, dec, base, fillPrice, cfg)
-	case Sell:
-		e.executeSell(acc, unfilled, window, i, dec, base, fillPrice, cfg)
-	}
-}
-
-func (e Engine) executeBuy(acc *account, unfilled *[]UnfilledOrder, window []data.KLine, i int, dec Decision, base, fillPrice float64, cfg Config) {
-	// Resolve target quantity from Qty or Amount.
-	qty := dec.Qty
-	if qty == 0 && dec.Amount > 0 {
-		qty = int(dec.Amount / fillPrice)
-	}
-	if qty <= 0 {
-		return
-	}
-	turnover := float64(qty) * fillPrice
-	commission := cfg.Cost.Commission(turnover)
-	need := turnover + commission
-	if need > acc.cash {
-		// Insufficient cash: abandon, cash & holdings unchanged (Requirement 7.8).
-		*unfilled = append(*unfilled, UnfilledOrder{
-			Date: window[i].Date, Action: "buy", Reason: "insufficient_cash", Qty: qty,
-		})
-		return
-	}
-	slippage := absFloat(fillPrice-base) * float64(qty)
-	acc.addLot(qty, i, fillPrice, commission)
-	acc.trades = append(acc.trades, TradeRecord{
-		Date: window[i].Date, Action: "buy", Price: fillPrice, BasePrice: base,
-		Qty: qty, Turnover: turnover, Commission: commission, StampTax: 0,
-		Slippage: slippage, CostTotal: commission + slippage,
-	})
-}
-
-func (e Engine) executeSell(acc *account, unfilled *[]UnfilledOrder, window []data.KLine, i int, dec Decision, base, fillPrice float64, cfg Config) {
-	qty := dec.Qty
-	if qty == 0 && dec.Amount > 0 {
-		qty = int(dec.Amount / fillPrice)
-	}
-	if qty <= 0 {
-		return
-	}
-	sellable := acc.sellable(i, cfg.TPlus1)
-	if qty > sellable {
-		// T+1 (or holdings) restricts the sell: only fill the sellable part,
-		// record the rejected remainder (Requirement 8.1).
-		rejected := qty - sellable
-		*unfilled = append(*unfilled, UnfilledOrder{
-			Date: window[i].Date, Action: "sell", Reason: "tplus1_rejected", Qty: rejected,
-		})
-		qty = sellable
-	}
-	if qty <= 0 {
-		return
-	}
-	turnover := float64(qty) * fillPrice
-	commission := cfg.Cost.Commission(turnover)
-	stampTax := cfg.Cost.StampTax(turnover, Sell)
-	slippage := absFloat(fillPrice-base) * float64(qty)
-
-	costBasis := acc.sellFIFO(qty, i, cfg.TPlus1)
-	proceeds := turnover - commission - stampTax
-	acc.cash += proceeds
-	realized := proceeds - costBasis // net realized P/L for this close (Requirement 12.2, 12.4)
-
-	acc.trades = append(acc.trades, TradeRecord{
-		Date: window[i].Date, Action: "sell", Price: fillPrice, BasePrice: base,
-		Qty: qty, Turnover: turnover, Commission: commission, StampTax: stampTax,
-		Slippage: slippage, CostTotal: commission + stampTax + slippage,
-		RealizedPL: realized,
-	})
-}
-
-func absFloat(x float64) float64 {
-	if x < 0 {
-		return -x
-	}
-	return x
+	return buildEngineResult(s, cfg, window, acc, curves, unfilled), nil
 }

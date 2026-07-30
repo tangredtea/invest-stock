@@ -2,6 +2,7 @@ package data
 
 import (
 	"errors"
+	"net/http"
 	"sync"
 	"testing"
 	"testing/quick"
@@ -157,4 +158,43 @@ func TestKLineCacheTTLClamping(t *testing.T) {
 	if got := NewKLineCache(defaultKLineTTL).ttl; got != defaultKLineTTL {
 		t.Errorf("in-range TTL should be preserved, got %v", got)
 	}
+}
+
+func TestDefaultKLineCacheCanBeReconfiguredConcurrently(t *testing.T) {
+	const secid = "1.600000"
+	body := `{"data":{"klines":["2023-12-08,1.0,1.1,1.2,0.9,1000","2023-12-09,1.1,1.2,1.3,1.0,1100"]}}`
+	withTransport(roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return okResponse(body), nil
+	}), func() {
+		var wg sync.WaitGroup
+		for i := 0; i < 8; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for j := 0; j < 100; j++ {
+					SetKLineCacheTTL(time.Duration(j%10+1) * time.Second)
+					SeedKLineCache(secid, sampleKLines())
+				}
+			}()
+		}
+		for i := 0; i < 8; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for j := 0; j < 100; j++ {
+					SeedKLineCache(secid, sampleKLines())
+					got, err := FetchKLines(secid)
+					if err != nil {
+						t.Errorf("FetchKLines returned error: %v", err)
+						return
+					}
+					if len(got) != len(sampleKLines()) {
+						t.Errorf("FetchKLines length = %d, want %d", len(got), len(sampleKLines()))
+						return
+					}
+				}
+			}()
+		}
+		wg.Wait()
+	})
 }

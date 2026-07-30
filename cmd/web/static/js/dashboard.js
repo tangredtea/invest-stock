@@ -23,6 +23,12 @@ document.addEventListener('DOMContentLoaded', () => {
 const fmt = (v, d=2) => v == null ? '--' : (v*100).toFixed(d) + '%';
 const fmtP = (v, d=3) => v == null ? '--' : v.toFixed(d);
 const fmtN = (v) => v == null ? '--' : v.toLocaleString('zh-CN', {maximumFractionDigits:0});
+const esc = (v) => String(v == null ? '' : v)
+  .replace(/&/g, '&amp;')
+  .replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;')
+  .replace(/'/g, '&#39;');
 
 const trendMap = {1:'上升趋势', '-1':'下降趋势', 0:'震荡'};
 const trendClass = {1:'up', '-1':'down', 0:'flat'};
@@ -204,8 +210,8 @@ function renderSignal(d) {
       </div>
       <div class="signal-card full">
         <div class="label">指标依据</div>
-        <ul class="reasons">${(s.t0Reasons||[]).map(r=>'<li>'+r+'</li>').join('')}</ul>
-        ${s.reason ? '<div style="margin-top:4px;font-size:11px;color:var(--t-text2)">'+s.reason+'</div>' : ''}
+        <ul class="reasons">${(s.t0Reasons||[]).map(r=>'<li>'+esc(r)+'</li>').join('')}</ul>
+        ${s.reason ? '<div style="margin-top:4px;font-size:11px;color:var(--t-text2)">'+esc(s.reason)+'</div>' : ''}
       </div>
     </div>`;
 }
@@ -214,13 +220,14 @@ function renderSignal(d) {
 function renderBacktest(d) {
   if (!d.backtest || !d.backtest.length) return;
   const wrap = document.getElementById('backtestWrap');
+  const monitorCode = String(d.code || '').replace(/[^0-9A-Za-z_.-]/g, '');
   wrap.innerHTML = `<table class="bt-table">
     <thead><tr>
       <th>策略</th><th>总收益</th><th>年化</th><th>最大回撤</th><th>夏普</th>
       <th>持仓</th><th>均价</th><th>终值</th><th>投入</th><th></th>
     </tr></thead>
     <tbody>${d.backtest.map((b,i) => `<tr>
-      <td style="color:var(--t-text)">${b.name}</td>
+      <td style="color:var(--t-text)">${esc(b.name)}</td>
       <td class="${b.totalReturn>=0?'up':'down'}">${fmt(b.totalReturn)}</td>
       <td class="${b.annualReturn>=0?'up':'down'}">${fmt(b.annualReturn)}</td>
       <td class="down">${fmt(b.maxDrawdown)}</td>
@@ -229,7 +236,7 @@ function renderBacktest(d) {
       <td>${fmtP(b.avgCost,4)}</td>
       <td>${fmtN(b.finalValue)}</td>
       <td>${fmtN(b.totalCost)}</td>
-      <td><button class="btn-sm" onclick="startMonitor('${d.code}',${i},this)">监控</button></td>
+      <td><button class="btn-sm" onclick="startMonitor('${monitorCode}',${i},this)">监控</button></td>
     </tr>`).join('')}</tbody>
   </table>`;
 }
@@ -239,7 +246,7 @@ function addLog(cls, msg) {
   const log = document.getElementById('monitorLog');
   const time = new Date().toLocaleTimeString('zh-CN', {hour12:false});
   log.insertAdjacentHTML('beforeend',
-    `<div class="log-entry ${cls}"><span class="log-time">${time}</span><span class="log-msg">${msg}</span></div>`);
+    `<div class="log-entry ${esc(cls)}"><span class="log-time">${esc(time)}</span><span class="log-msg">${esc(msg)}</span></div>`);
   log.scrollTop = log.scrollHeight;
 }
 

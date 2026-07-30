@@ -1,12 +1,118 @@
 package backtest
 
 import (
+	"fmt"
 	"math"
+	"strings"
 	"testing"
 	"testing/quick"
 
 	"invest/pkg/data"
+	"invest/pkg/indicator"
 )
+
+func TestEngineRejectsInvalidKLines(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func([]data.KLine)
+	}{
+		{
+			name: "zero date",
+			mutate: func(ks []data.KLine) {
+				ks[0].Date = data.KLine{}.Date
+			},
+		},
+		{
+			name: "nan close",
+			mutate: func(ks []data.KLine) {
+				ks[10].Close = math.NaN()
+			},
+		},
+		{
+			name: "negative volume",
+			mutate: func(ks []data.KLine) {
+				ks[10].Volume = -1
+			},
+		},
+		{
+			name: "high below close",
+			mutate: func(ks []data.KLine) {
+				ks[10].High = ks[10].Close - 0.01
+			},
+		},
+		{
+			name: "duplicate date",
+			mutate: func(ks []data.KLine) {
+				ks[10].Date = ks[9].Date
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ks := genSymbolKlines(80, 0)
+			tt.mutate(ks)
+
+			_, err := Engine{}.Run(ks, neverTrade{}, DefaultConfig())
+			if err == nil {
+				t.Fatalf("Run accepted invalid KLines")
+			}
+		})
+	}
+}
+
+func TestContextAccessorsReportInvalidHistoricalIndex(t *testing.T) {
+	ctx := &Context{
+		Index:  2,
+		Klines: genSymbolKlines(2, 0),
+		Series: indicator.ComputeSeries([]float64{1, 2}),
+	}
+
+	expectPanicContains(t, func() { _ = ctx.Bar(2) }, "out of range")
+	expectPanicContains(t, func() { _ = ctx.Ind(FieldMA5, 2) }, "out of range")
+	if got := ctx.Ind(IndField(999), 1); got != 0 {
+		t.Fatalf("unknown indicator field = %v, want 0", got)
+	}
+	expectPanicContains(t, func() { _ = ctx.Ind(IndField(999), 3) }, "look-ahead")
+}
+
+func expectPanicContains(t *testing.T, fn func(), want string) {
+	t.Helper()
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatalf("expected panic containing %q", want)
+		}
+		msg := fmt.Sprint(r)
+		if !strings.Contains(msg, want) {
+			t.Fatalf("panic = %q, want substring %q", r, want)
+		}
+	}()
+	fn()
+}
+
+func TestEngineRejectsInvalidStrategyDecision(t *testing.T) {
+	tests := []struct {
+		name string
+		dec  Decision
+	}{
+		{name: "invalid action", dec: Decision{Action: Action(99), Qty: 100}},
+		{name: "hold with qty", dec: Decision{Action: Hold, Qty: 100}},
+		{name: "negative qty", dec: Decision{Action: Buy, Qty: -100}},
+		{name: "nan amount", dec: Decision{Action: Buy, Amount: math.NaN()}},
+		{name: "empty buy", dec: Decision{Action: Buy}},
+		{name: "qty and amount", dec: Decision{Action: Sell, Qty: 100, Amount: 1000}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := Engine{}.Run(genSymbolKlines(80, 0), fixedDecisionStrategy{dec: tt.dec}, DefaultConfig())
+			if err == nil {
+				t.Fatalf("Run accepted invalid strategy decision: %+v", tt.dec)
+			}
+		})
+	}
+}
 
 // Feature: quant-backtest-platform, Property 10: 对任意合法输入三元组(K线序列、策略+参数、Config),
 // 重复执行 2 次或以上,Engine.Run 返回的 Result 逐字段逐位完全一致(引擎为纯函数,不读时钟/随机/网络)。
@@ -97,8 +203,8 @@ func TestProperty15_CashNonNegative(t *testing.T) {
 // insufficient-cash guard so cash can never go negative).
 type greedyBuyer struct{ startIndex int }
 
-func (s *greedyBuyer) Name() string { return "greedy" }
-func (s *greedyBuyer) MinBars() int { return s.startIndex + 1 }
+func (s *greedyBuyer) Name() string        { return "greedy" }
+func (s *greedyBuyer) MinBars() int        { return s.startIndex + 1 }
 func (s *greedyBuyer) Params() []ParamSpec { return nil }
 func (s *greedyBuyer) Decide(ctx *Context) Decision {
 	if ctx.Index >= s.startIndex && ctx.Cash > 0 {
@@ -185,7 +291,16 @@ func TestProperty21_ZeroCostZeroTradeEquity(t *testing.T) {
 
 type neverTrade struct{}
 
-func (neverTrade) Name() string            { return "never" }
-func (neverTrade) MinBars() int            { return 60 }
-func (neverTrade) Params() []ParamSpec     { return nil }
+func (neverTrade) Name() string             { return "never" }
+func (neverTrade) MinBars() int             { return 60 }
+func (neverTrade) Params() []ParamSpec      { return nil }
 func (neverTrade) Decide(*Context) Decision { return HoldDecision() }
+
+type fixedDecisionStrategy struct{ dec Decision }
+
+func (fixedDecisionStrategy) Name() string        { return "fixed-decision" }
+func (fixedDecisionStrategy) MinBars() int        { return 60 }
+func (fixedDecisionStrategy) Params() []ParamSpec { return nil }
+func (s fixedDecisionStrategy) Decide(*Context) Decision {
+	return s.dec
+}

@@ -12,6 +12,14 @@
     return h;
   }
   function el(id) { return document.getElementById(id); }
+  function esc(v) {
+    return String(v == null ? '' : v)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
 
   async function postJSON(url, body) {
     const ctrl = new AbortController();
@@ -97,7 +105,7 @@
       ['再平衡次数', String(rebCount || 0)],
       ['再平衡成本', (rebCost || 0).toFixed(2)],
     ];
-    box.innerHTML = rows.map(([k, v]) => '<div class="bt-metric"><span>' + k + '</span><b>' + v + '</b></div>').join('');
+    box.innerHTML = rows.map(([k, v]) => '<div class="bt-metric"><span>' + esc(k) + '</span><b>' + esc(v) + '</b></div>').join('');
   }
 
   function renderAttribution(attr) {
@@ -105,8 +113,8 @@
     if (!box) return;
     let html = '<table class="bt-table"><thead><tr><th>标的</th><th>收益贡献</th><th>最终权重</th></tr></thead><tbody>';
     attr.forEach(a => {
-      html += '<tr><td>' + a.symbol + '</td><td class="' + (a.contribution >= 0 ? 'up' : 'down') + '">' +
-        fmtPct(a.contribution) + '</td><td>' + fmtPct(a.finalWeight) + '</td></tr>';
+      html += '<tr><td>' + esc(a.symbol) + '</td><td class="' + (a.contribution >= 0 ? 'up' : 'down') + '">' +
+        esc(fmtPct(a.contribution)) + '</td><td>' + esc(fmtPct(a.finalWeight)) + '</td></tr>';
     });
     html += '</tbody></table>';
     box.innerHTML = html;

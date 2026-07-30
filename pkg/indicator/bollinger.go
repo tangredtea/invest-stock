@@ -9,6 +9,9 @@ func BollingerBands(closes []float64, period int, mult float64) (upper, middle, 
 	middle = SMA(closes, period)
 	upper = make([]float64, n)
 	lower = make([]float64, n)
+	if period <= 0 {
+		return
+	}
 
 	for i := period - 1; i < n; i++ {
 		sum := 0.0

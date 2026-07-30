@@ -15,8 +15,6 @@ import (
 	"invest/internal/model"
 	"invest/internal/store"
 	"invest/pkg/data"
-
-	"golang.org/x/net/websocket"
 )
 
 //go:embed static
@@ -62,88 +60,23 @@ func main() {
 	limiter := NewLoginRateLimiter(defaultLoginThreshold, defaultLoginWindow)
 
 	// --- Template renderer ---
-	tmplSub, _ := fs.Sub(templateFiles, "templates")
+	tmplSub, err := fs.Sub(templateFiles, "templates")
+	if err != nil {
+		fmt.Println("模板目录加载失败:", err)
+		os.Exit(1)
+	}
 	renderer, err := NewRenderer(tmplSub)
 	if err != nil {
 		fmt.Println("模板解析失败:", err)
 		os.Exit(1)
 	}
 
-	// --- App instances ---
-	authAPI := &authApp{jwt: jwtMgr, users: users, limiter: limiter}
-	pages := &pageApp{renderer: renderer}
-
-	// --- Explicit mux ---
-	mux := http.NewServeMux()
-
-	// --- Static files ---
-	staticSub, _ := fs.Sub(staticFiles, "static")
-	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticSub))))
-
-	// --- Page routes ---
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/" {
-			http.Redirect(w, r, "/dashboard", http.StatusFound)
-			return
-		}
-		http.NotFound(w, r)
-	})
-	mux.HandleFunc("/login", pages.handleLogin)
-	mux.HandleFunc("/register", pages.handleRegister)
-	mux.HandleFunc("/dashboard", pages.handleDashboard)
-	mux.HandleFunc("/users", pages.handleUsers)
-
-	// --- Auth API ---
-	mux.HandleFunc("/api/auth/login", authAPI.handleLogin)
-	mux.HandleFunc("/api/auth/register", authAPI.handleRegister)
-	mux.HandleFunc("/api/auth/me", requireAuth(jwtMgr, authAPI.handleMe))
-
-	// --- Admin API ---
-	mux.HandleFunc("/api/admin/users", requireAdmin(jwtMgr, authAPI.handleListUsers))
-	mux.HandleFunc("/api/admin/users/", requireAdmin(jwtMgr, func(w http.ResponseWriter, r *http.Request) {
-		switch r.Method {
-		case http.MethodPut:
-			authAPI.handleUpdateUser(w, r)
-		case http.MethodDelete:
-			authAPI.handleDeleteUser(w, r)
-		default:
-			writeJSON(w, 405, jsonResp{Code: 405, Message: "method not allowed"})
-		}
-	}))
-
-	// --- Protected existing API ---
-	mux.HandleFunc("/api/analyze", requireAuth(jwtMgr, handleAnalyze))
-	mux.HandleFunc("/api/quote", requireAuth(jwtMgr, handleQuote))
-
-	// --- Backtest API (new engine) ---
-	mux.HandleFunc("/api/backtest", requireAuth(jwtMgr, handleBacktest))
-	mux.HandleFunc("/api/backtest/compare", requireAuth(jwtMgr, handleBacktestCompare))
-	mux.HandleFunc("/api/strategies", requireAuth(jwtMgr, handleListStrategies))
-
-	// --- Portfolio backtest API (multi-symbol + risk management) ---
-	mux.HandleFunc("/api/portfolio/backtest", requireAuth(jwtMgr, handlePortfolioBacktest))
-
-	// --- WebSocket monitor (authenticated via subprotocol token) ---
-	wsServer := &websocket.Server{
-		Handshake: func(config *websocket.Config, r *http.Request) error {
-			// Echo back the accepted "bearer" subprotocol so the handshake
-			// completes per RFC 6455; the token itself is not echoed.
-			config.Protocol = []string{wsTokenProtoPrefix}
-			return nil
-		},
-		Handler: makeMonitorHandler(jwtMgr),
+	mux, err := newAppMux(appDeps{jwt: jwtMgr, users: users, limiter: limiter, renderer: renderer})
+	if err != nil {
+		fmt.Println("路由初始化失败:", err)
+		os.Exit(1)
 	}
-	mux.Handle("/ws/monitor", wsServer)
-
-	// --- HTTP server with timeouts ---
-	srv := &http.Server{
-		Addr:              cfg.Addr,
-		Handler:           mux,
-		ReadTimeout:       15 * time.Second,
-		WriteTimeout:      15 * time.Second,
-		IdleTimeout:       60 * time.Second,
-		ReadHeaderTimeout: 5 * time.Second,
-	}
+	srv := newHTTPServer(cfg.Addr, mux)
 
 	// --- Start + graceful shutdown ---
 	go func() {

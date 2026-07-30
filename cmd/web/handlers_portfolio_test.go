@@ -1,8 +1,6 @@
 package main
 
 import (
-	"encoding/json"
-	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -11,32 +9,10 @@ import (
 
 	"invest/internal/auth"
 	"invest/pkg/backtest"
-	"invest/pkg/data"
 )
 
-func seedPortfolioData(t *testing.T, code string, n int, phase float64) {
-	t.Helper()
-	secid := resolveSecID(code)
-	if secid == "" {
-		t.Fatalf("bad code %q", code)
-	}
-	base := time.Date(2023, 1, 2, 0, 0, 0, 0, time.UTC)
-	klines := make([]data.KLine, n)
-	for i := 0; i < n; i++ {
-		price := 10 + 3*math.Sin(float64(i)/9+phase)
-		klines[i] = data.KLine{
-			Date: base.AddDate(0, 0, i), Open: price, High: price + 0.2,
-			Low: price - 0.2, Close: price, Volume: 1000,
-		}
-	}
-	data.SeedKLineCache(secid, klines)
-}
-
 func postPortfolio(body string) *httptest.ResponseRecorder {
-	req := httptest.NewRequest(http.MethodPost, "/api/portfolio/backtest", strings.NewReader(body))
-	rec := httptest.NewRecorder()
-	handlePortfolioBacktest(rec, req)
-	return rec
+	return postTestJSON("/api/portfolio/backtest", body, handlePortfolioBacktest)
 }
 
 func TestPortfolioBacktestSuccess(t *testing.T) {
@@ -53,9 +29,7 @@ func TestPortfolioBacktestSuccess(t *testing.T) {
 		Code int                      `json:"code"`
 		Data backtest.PortfolioResult `json:"data"`
 	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
+	decodeTestResponse(t, rec, &resp)
 	if len(resp.Data.Equity) == 0 || len(resp.Data.Weights) != 3 {
 		t.Errorf("expected equity curve and 3 symbol weight series, got equity=%d weights=%d", len(resp.Data.Equity), len(resp.Data.Weights))
 	}
@@ -73,11 +47,97 @@ func TestPortfolioBacktestTooFewSymbols(t *testing.T) {
 	}
 }
 
+func TestPortfolioBacktestRejectsDuplicateSymbols(t *testing.T) {
+	seedPortfolioData(t, "600000", 200, 0)
+	rec := postPortfolio(`{"codes":["600000","600000"],"scheme":0}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+}
+
+func TestPortfolioBacktestRejectsDuplicateSymbolsAfterTrim(t *testing.T) {
+	seedPortfolioData(t, "600000", 200, 0)
+	rec := postPortfolio(`{"codes":["600000"," 600000 "],"scheme":0}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+}
+
+func TestPortfolioBacktestNormalizesCodesAndWeightKeys(t *testing.T) {
+	seedPortfolioData(t, "600000", 200, 0)
+	seedPortfolioData(t, "600001", 200, 1.5)
+	body := `{"codes":[" 600000 ","600001"],"scheme":1,"weights":{" 600000 ":0.4,"600001":0.4},"risk":{"perSymbolCap":{" 600000 ":0.5}}}`
+	rec := postPortfolio(body)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		Data backtest.PortfolioResult `json:"data"`
+	}
+	decodeTestResponse(t, rec, &resp)
+	if len(resp.Data.Symbols) != 2 || resp.Data.Symbols[0] != "600000" || resp.Data.Symbols[1] != "600001" {
+		t.Fatalf("symbols not normalized/sorted: %+v", resp.Data.Symbols)
+	}
+	if _, ok := resp.Data.Weights[" 600000 "]; ok {
+		t.Fatalf("result contains unnormalized weight key")
+	}
+	if _, ok := resp.Data.Weights["600000"]; !ok {
+		t.Fatalf("result missing normalized weight key")
+	}
+}
+
+func TestPortfolioBacktestRejectsDuplicateNormalizedWeightKeys(t *testing.T) {
+	seedPortfolioData(t, "600000", 200, 0)
+	seedPortfolioData(t, "600001", 200, 1.5)
+	body := `{"codes":["600000","600001"],"scheme":1,"weights":{"600000":0.3," 600000 ":0.4,"600001":0.3}}`
+	rec := postPortfolio(body)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+}
+
+func TestPortfolioBacktestRejectsDuplicateNormalizedCapKeys(t *testing.T) {
+	seedPortfolioData(t, "600000", 200, 0)
+	seedPortfolioData(t, "600001", 200, 1.5)
+	body := `{"codes":["600000","600001"],"scheme":0,"risk":{"perSymbolCap":{"600000":0.4," 600000 ":0.5}}}`
+	rec := postPortfolio(body)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+}
+
+func TestPortfolioBacktestRejectsWeightKeyOutsideCodes(t *testing.T) {
+	seedPortfolioData(t, "600000", 200, 0)
+	seedPortfolioData(t, "600001", 200, 1.5)
+	body := `{"codes":["600000","600001"],"scheme":1,"weights":{"600000":0.4,"600002":0.4}}`
+	rec := postPortfolio(body)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+}
+
+func TestPortfolioBacktestRejectsCapKeyOutsideCodes(t *testing.T) {
+	seedPortfolioData(t, "600000", 200, 0)
+	seedPortfolioData(t, "600001", 200, 1.5)
+	body := `{"codes":["600000","600001"],"scheme":0,"risk":{"perSymbolCap":{"600002":0.4}}}`
+	rec := postPortfolio(body)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+}
+
 func TestPortfolioBacktestInvalidCode(t *testing.T) {
 	// Requirement 7.9: invalid security code -> 400.
 	rec := postPortfolio(`{"codes":["600000","zzz"],"scheme":0}`)
 	if rec.Code != 400 {
 		t.Errorf("expected 400 for invalid code, got %d", rec.Code)
+	}
+}
+
+func TestPortfolioBacktestRejectsUnknownRequestFields(t *testing.T) {
+	rec := postPortfolio(`{"codes":["600000","600001"],"scheme":0,"unexpected":true}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
 	}
 }
 
@@ -91,14 +151,20 @@ func TestPortfolioBacktestInvalidConfig(t *testing.T) {
 	}
 }
 
+func TestPortfolioBacktestInvalidScheme(t *testing.T) {
+	seedPortfolioData(t, "600000", 200, 0)
+	seedPortfolioData(t, "600001", 200, 1.0)
+	rec := postPortfolio(`{"codes":["600000","600001"],"scheme":99}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+}
+
 func TestPortfolioBacktestRequiresAuth(t *testing.T) {
 	// Requirement 7.8: no token -> 401, no backtest run.
 	jwtMgr := auth.NewJWTManager(strings.Repeat("k", 40), time.Hour)
 	protected := requireAuth(jwtMgr, handlePortfolioBacktest)
-	req := httptest.NewRequest(http.MethodPost, "/api/portfolio/backtest",
-		strings.NewReader(`{"codes":["600000","600001"],"scheme":0}`))
-	rec := httptest.NewRecorder()
-	protected(rec, req)
+	rec := postTestJSON("/api/portfolio/backtest", `{"codes":["600000","600001"],"scheme":0}`, protected)
 	if rec.Code != http.StatusUnauthorized {
 		t.Errorf("expected 401 without token, got %d", rec.Code)
 	}

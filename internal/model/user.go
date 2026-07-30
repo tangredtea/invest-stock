@@ -3,21 +3,9 @@ package model
 import (
 	"database/sql"
 	"fmt"
-	"time"
 
 	"invest/internal/auth"
 )
-
-// User represents a system user.
-type User struct {
-	ID        int64     `json:"id"`
-	Username  string    `json:"username"`
-	Password  string    `json:"-"`
-	Role      string    `json:"role"`
-	Status    int       `json:"status"`
-	CreatedAt time.Time `json:"createdAt"`
-	UpdatedAt time.Time `json:"updatedAt"`
-}
 
 // UserStore provides CRUD operations for users.
 type UserStore struct {
@@ -31,6 +19,9 @@ func NewUserStore(db *sql.DB) *UserStore {
 
 // Create inserts a new user with a hashed password.
 func (s *UserStore) Create(username, password, role string) (*User, error) {
+	if !validRole(role) {
+		return nil, ErrInvalidRole
+	}
 	hashed, err := auth.HashPassword(password)
 	if err != nil {
 		return nil, fmt.Errorf("hash password: %w", err)
@@ -40,43 +31,31 @@ func (s *UserStore) Create(username, password, role string) (*User, error) {
 		username, hashed, role,
 	)
 	if err != nil {
+		if isDuplicateUserErr(err) {
+			return nil, ErrUserExists
+		}
 		return nil, fmt.Errorf("insert user: %w", err)
 	}
-	id, _ := res.LastInsertId()
+	id, err := res.LastInsertId()
+	if err != nil {
+		return nil, fmt.Errorf("insert user id: %w", err)
+	}
 	return s.GetByID(id)
 }
 
 // GetByUsername finds a user by username.
 func (s *UserStore) GetByUsername(username string) (*User, error) {
-	u := &User{}
-	err := s.db.QueryRow(
-		`SELECT id, username, password, role, status, created_at, updated_at FROM users WHERE username = ?`,
-		username,
-	).Scan(&u.ID, &u.Username, &u.Password, &u.Role, &u.Status, &u.CreatedAt, &u.UpdatedAt)
-	if err != nil {
-		return nil, err
-	}
-	return u, nil
+	return scanUser(s.db.QueryRow(selectUserFields+` WHERE username = ?`, username))
 }
 
 // GetByID finds a user by ID.
 func (s *UserStore) GetByID(id int64) (*User, error) {
-	u := &User{}
-	err := s.db.QueryRow(
-		`SELECT id, username, password, role, status, created_at, updated_at FROM users WHERE id = ?`,
-		id,
-	).Scan(&u.ID, &u.Username, &u.Password, &u.Role, &u.Status, &u.CreatedAt, &u.UpdatedAt)
-	if err != nil {
-		return nil, err
-	}
-	return u, nil
+	return scanUser(s.db.QueryRow(selectUserFields+` WHERE id = ?`, id))
 }
 
 // List returns all users.
 func (s *UserStore) List() ([]User, error) {
-	rows, err := s.db.Query(
-		`SELECT id, username, password, role, status, created_at, updated_at FROM users ORDER BY id`,
-	)
+	rows, err := s.db.Query(selectUserFields + ` ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
@@ -95,17 +74,29 @@ func (s *UserStore) List() ([]User, error) {
 
 // Update modifies a user's role and status.
 func (s *UserStore) Update(id int64, role string, status int) error {
-	_, err := s.db.Exec(
+	if !validRole(role) {
+		return ErrInvalidRole
+	}
+	if !validStatus(status) {
+		return ErrInvalidStatus
+	}
+	res, err := s.db.Exec(
 		`UPDATE users SET role = ?, status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
 		role, status, id,
 	)
-	return err
+	if err != nil {
+		return err
+	}
+	return ensureUserAffected(res)
 }
 
 // Delete removes a user by ID.
 func (s *UserStore) Delete(id int64) error {
-	_, err := s.db.Exec(`DELETE FROM users WHERE id = ?`, id)
-	return err
+	res, err := s.db.Exec(`DELETE FROM users WHERE id = ?`, id)
+	if err != nil {
+		return err
+	}
+	return ensureUserAffected(res)
 }
 
 // SeedAdmin creates the default admin user if no users exist.
@@ -117,6 +108,6 @@ func (s *UserStore) SeedAdmin(username, password string) error {
 	if count > 0 {
 		return nil
 	}
-	_, err := s.Create(username, password, "admin")
+	_, err := s.Create(username, password, RoleAdmin)
 	return err
 }

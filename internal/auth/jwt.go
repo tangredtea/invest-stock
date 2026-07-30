@@ -59,6 +59,9 @@ func (m *JWTManager) Parse(tokenStr string) (*Claims, error) {
 		return m.secret, nil
 	})
 	if err != nil {
+		if errors.Is(err, jwt.ErrTokenExpired) {
+			return nil, ErrExpiredToken
+		}
 		return nil, ErrInvalidToken
 	}
 	claims, ok := token.Claims.(*Claims)

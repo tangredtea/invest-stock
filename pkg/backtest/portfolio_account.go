@@ -69,11 +69,14 @@ func (p *portfolioAccount) equity(prices map[string]float64) float64 {
 
 // weight returns a symbol's market-value weight in the portfolio.
 func (p *portfolioAccount) weight(sym string, prices map[string]float64) float64 {
-	eq := p.equity(prices)
-	if eq <= 0 {
+	return p.weightWithEquity(sym, prices, p.equity(prices))
+}
+
+func (p *portfolioAccount) weightWithEquity(sym string, prices map[string]float64, equity float64) float64 {
+	if equity <= 0 {
 		return 0
 	}
-	return float64(p.shares(sym)) * prices[sym] / eq
+	return float64(p.shares(sym)) * prices[sym] / equity
 }
 
 // costAvg returns the average cost per share for a symbol's current holding,

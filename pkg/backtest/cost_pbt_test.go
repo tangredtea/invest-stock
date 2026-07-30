@@ -2,26 +2,58 @@ package backtest
 
 import (
 	"math"
+	"math/rand"
+	"reflect"
 	"testing"
 	"testing/quick"
 
 	"invest/pkg/data"
 )
 
+type turnoverRateMinCase struct {
+	Turnover float64
+	Rate     float64
+	Min      float64
+}
+
+func (turnoverRateMinCase) Generate(r *rand.Rand, _ int) reflect.Value {
+	return reflect.ValueOf(turnoverRateMinCase{
+		Turnover: r.Float64() * 1e12,
+		Rate:     r.Float64() * maxCommissionRate,
+		Min:      r.Float64() * maxMinCommission,
+	})
+}
+
+type turnoverRateCase struct {
+	Turnover float64
+	Rate     float64
+}
+
+func (turnoverRateCase) Generate(r *rand.Rand, _ int) reflect.Value {
+	return reflect.ValueOf(turnoverRateCase{
+		Turnover: r.Float64() * 1e12,
+		Rate:     r.Float64() * maxStampTaxRate,
+	})
+}
+
+func nearlyEqual(got, want float64) bool {
+	const tolerance = 1e-9
+	diff := math.Abs(got - want)
+	scale := math.Max(1, math.Abs(want))
+	return diff <= tolerance*scale
+}
+
 // Feature: quant-backtest-platform, Property 17: 对任意成交额 turnover>=0、手续费比例 rate∈[0,0.01]
 // 与单笔最低手续费 min∈[0,1000],计算所得手续费等于 max(turnover*rate, min)。
 func TestProperty17_CommissionFormula(t *testing.T) {
-	f := func(turnoverRaw, rateRaw, minRaw float64) bool {
-		turnover := math.Abs(turnoverRaw)
-		rate := math.Mod(math.Abs(rateRaw), 0.01)
-		minc := math.Mod(math.Abs(minRaw), 1000)
-		m := CostModel{CommissionRate: rate, MinCommission: minc, Tick: 0.01}
-		got := m.Commission(turnover)
-		want := turnover * rate
-		if want < minc {
-			want = minc
+	f := func(tc turnoverRateMinCase) bool {
+		m := CostModel{CommissionRate: tc.Rate, MinCommission: tc.Min, Tick: defaultTick}
+		got := m.Commission(tc.Turnover)
+		want := tc.Turnover * tc.Rate
+		if want < tc.Min {
+			want = tc.Min
 		}
-		return math.Abs(got-want) <= 1e-9
+		return nearlyEqual(got, want)
 	}
 	if err := quick.Check(f, &quick.Config{MaxCount: 100}); err != nil {
 		t.Errorf("commission formula violated: %v", err)
@@ -31,17 +63,52 @@ func TestProperty17_CommissionFormula(t *testing.T) {
 // Feature: quant-backtest-platform, Property 18: 对任意成交额与印花税率 rate∈[0,0.01],买入印花税恒为 0,
 // 卖出印花税等于 turnover*rate。
 func TestProperty18_StampTaxSellOnly(t *testing.T) {
-	f := func(turnoverRaw, rateRaw float64) bool {
-		turnover := math.Abs(turnoverRaw)
-		rate := math.Mod(math.Abs(rateRaw), 0.01)
-		m := CostModel{StampTaxRate: rate, Tick: 0.01}
-		if m.StampTax(turnover, Buy) != 0 {
+	f := func(tc turnoverRateCase) bool {
+		m := CostModel{StampTaxRate: tc.Rate, Tick: defaultTick}
+		if m.StampTax(tc.Turnover, Buy) != 0 {
 			return false
 		}
-		return math.Abs(m.StampTax(turnover, Sell)-turnover*rate) <= 1e-9
+		return nearlyEqual(m.StampTax(tc.Turnover, Sell), tc.Turnover*tc.Rate)
 	}
 	if err := quick.Check(f, &quick.Config{MaxCount: 100}); err != nil {
 		t.Errorf("stamp tax sell-only violated: %v", err)
+	}
+}
+
+func TestCostModelRejectsInvalidNumbers(t *testing.T) {
+	m := CostModel{
+		CommissionRate: 0.0003,
+		MinCommission:  5,
+		StampTaxRate:   0.0005,
+		SlippageRatio:  0.001,
+		Tick:           defaultTick,
+	}
+	invalid := []float64{math.NaN(), math.Inf(1), math.Inf(-1), -1}
+	for _, v := range invalid {
+		if got := m.Commission(v); got != 0 {
+			t.Fatalf("Commission(%v) = %v, want 0", v, got)
+		}
+		if got := m.StampTax(v, Sell); got != 0 {
+			t.Fatalf("StampTax(%v, Sell) = %v, want 0", v, got)
+		}
+		if got := m.FillPrice(v, Buy); got != 0 {
+			t.Fatalf("FillPrice(%v, Buy) = %v, want 0", v, got)
+		}
+	}
+
+	invalidModels := []CostModel{
+		{SlippageMode: SlippageRatio, SlippageRatio: math.Inf(1), Tick: defaultTick},
+		{SlippageMode: SlippageRatio, SlippageRatio: math.MaxFloat64, Tick: defaultTick},
+		{SlippageMode: SlippageTick, SlippageTicks: 1, Tick: math.NaN()},
+		{StampTaxRate: math.Inf(1), Tick: defaultTick},
+	}
+	for _, model := range invalidModels {
+		if got := model.FillPrice(10, Buy); !finiteFloat(got) {
+			t.Fatalf("FillPrice with invalid model = %v, want finite value", got)
+		}
+		if got := model.StampTax(10, Sell); !finiteFloat(got) {
+			t.Fatalf("StampTax with invalid model = %v, want finite value", got)
+		}
 	}
 }
 
