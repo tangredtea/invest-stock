@@ -86,6 +86,9 @@ git tag v1.0.0 && git push origin v1.0.0
 镜像更新不会替代数据库备份，部署前仍需单独备份 `data/invest.db` 及其
 WAL/SHM 文件。
 
+生产服务器只拉取应用镜像，完整步骤见
+[Docker 部署](docs/deployment.md)。Compose 不启动数据库、缓存或其他基础设施。
+
 ## 维护约定
 
 - API 鉴权只接受 `Authorization: Bearer <token>`，避免把 token 放入 URL。

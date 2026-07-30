@@ -1,0 +1,19 @@
+services:
+  app:
+    image: ${INVEST_STOCK_IMAGE:?Set INVEST_STOCK_IMAGE to an immutable digest}
+    env_file:
+      - .env
+    restart: unless-stopped
+    init: true
+    ports:
+      - "${INVEST_STOCK_BIND_HOST:-127.0.0.1}:8081:8081"
+    volumes:
+      - ./data:/app/data
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+

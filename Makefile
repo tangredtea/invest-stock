@@ -1,4 +1,4 @@
-.PHONY: preflight test vet race build docker-build release-check run-web
+.PHONY: preflight test vet race deployment-check build docker-build release-check run-web
 
 VERSION ?= $(shell git describe --tags --always --dirty)
 REVISION ?= $(shell git rev-parse HEAD)
@@ -13,7 +13,11 @@ vet:
 race:
 	go test -race ./...
 
-preflight: test vet race
+preflight: test vet race deployment-check
+
+deployment-check:
+	@grep -q '$${INVEST_STOCK_IMAGE:?' compose.production.yml
+	@! grep -Eq '^  (postgres|mysql|redis|qdrant|mongodb):|^[[:space:]]+build:' compose.production.yml
 
 build:
 	go build -trimpath -o bin/invest-stock ./cmd/web
