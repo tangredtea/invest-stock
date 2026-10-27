@@ -4,6 +4,11 @@ umask 077
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 project=${GITHUB_REPOSITORY:?GITHUB_REPOSITORY is required}
 source_root=${SECURITY_FLEET_SOURCE_DIR:-${GITHUB_WORKSPACE:?GITHUB_WORKSPACE is required}}
+# Only the isolated checkout created for this exact run is disposable; reports stay outside it.
+if [[ -n "${GITHUB_RUN_ID:-}" && ! -L "$source_root" &&
+      "$source_root" == "$GITHUB_WORKSPACE/.security-fleet-source-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT:-1}" ]]; then
+  trap 'rm -rf -- "$source_root"' EXIT
+fi
 if [[ -n "${GITHUB_SHA:-}" ]]; then
   [[ "$(git -C "$source_root" rev-parse HEAD)" == "$GITHUB_SHA" ]] || {
     echo 'Source checkout does not match the requested workflow SHA.' >&2
