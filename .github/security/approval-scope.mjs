@@ -1,4 +1,4 @@
-// Shared policy v1.0.0. Specialized adapters still validate expiry, packages and runtime.
+// Shared policy v1.0.1. Specialized adapters still validate expiry, packages and runtime.
 export function projectScopedApproval(approval, expectedProject) {
   if (approval?.scope !== "project-packages-runtime") return false;
   if (

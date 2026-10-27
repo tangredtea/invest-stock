@@ -21,8 +21,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
+          path: .security-fleet-source-${{ github.run_id }}-${{ github.run_attempt }}
       - name: Read-only source dependency scan
         shell: bash
+        working-directory: .security-fleet-source-${{ github.run_id }}-${{ github.run_attempt }}
         env:
           SECURITY_FLEET_MODE: weekly
+          SECURITY_FLEET_SOURCE_DIR: ${{ github.workspace }}/.security-fleet-source-${{ github.run_id }}-${{ github.run_attempt }}
         run: bash .github/security/weekly.sh

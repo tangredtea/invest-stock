@@ -11,10 +11,14 @@ from pathlib import Path
 import re
 import subprocess
 
-VERSION = "1.0.0"
+VERSION = "1.0.1"
 TRIVY_VERSION = "0.70.0"
 SKIP_DIRS = [".git", "node_modules", ".venv", "venv", "vendor", ".wasp", "dist", "build", ".next"]
 LOCKS = {"package-lock.json", "npm-shrinkwrap.json", "pnpm-lock.yaml", "yarn.lock", "bun.lock", "bun.lockb", "go.mod", "go.sum", "poetry.lock", "uv.lock", "Pipfile.lock", "Cargo.lock", "composer.lock", "Gemfile.lock", "packages.lock.json"}
+
+
+class IncompleteCoverage(ValueError):
+    pass
 
 
 def run(args, **kwargs):
@@ -55,7 +59,7 @@ def summarize(report, *, project, target, kind, manifests=None):
     if kind == "source" and not manifests:
         status = "not-applicable"
     elif not packages:
-        raise ValueError("Expected dependencies/image packages but scanner detected no installed packages")
+        raise IncompleteCoverage("Expected dependencies/image packages but scanner detected no installed packages")
     return {"schemaVersion": 1, "toolkitVersion": VERSION, "project": project,
             "kind": kind, "target": target, "status": status,
             "scannedAt": dt.datetime.now(dt.timezone.utc).isoformat(),
@@ -150,6 +154,8 @@ def main(argv=None):
         result = {"schemaVersion": 1, "project": args.project, "kind": args.kind,
                   "status": "incomplete", "errorType": type(error).__name__,
                   "scannedAt": dt.datetime.now(dt.timezone.utc).isoformat()}
+        if isinstance(error, IncompleteCoverage):
+            result["reason"] = "dependency-inventory-empty"
         failure = Path(args.output) / "failure.json"
         if not failure.exists():
             save(failure, result)

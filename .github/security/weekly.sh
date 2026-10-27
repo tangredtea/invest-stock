@@ -3,6 +3,13 @@ set -euo pipefail
 umask 077
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 project=${GITHUB_REPOSITORY:?GITHUB_REPOSITORY is required}
+source_root=${SECURITY_FLEET_SOURCE_DIR:-${GITHUB_WORKSPACE:?GITHUB_WORKSPACE is required}}
+if [[ -n "${GITHUB_SHA:-}" ]]; then
+  [[ "$(git -C "$source_root" rev-parse HEAD)" == "$GITHUB_SHA" ]] || {
+    echo 'Source checkout does not match the requested workflow SHA.' >&2
+    exit 2
+  }
+fi
 [[ "$project" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]
 python3 - "$script_dir/project.json" "$project" <<'PY'
 import json,sys
@@ -19,18 +26,20 @@ flock -w 1200 8
 trivy=$(bash "$script_dir/ensure-trivy.sh")
 output="$root/reports/${GITHUB_RUN_ID:?}-${GITHUB_RUN_ATTEMPT:-1}-${GITHUB_JOB:-audit}-$(date -u +%Y%m%dT%H%M%S)-$$"
 status=0
-python3 "$script_dir/scan.py" source "$GITHUB_WORKSPACE" --project "$project" \
+python3 "$script_dir/scan.py" source "$source_root" --project "$project" \
   --output "$output" --cache "$tool_root/cache" --trivy "$trivy" || status=$?
 notify_status=0
-python3 - "$output" "$GITHUB_STEP_SUMMARY" "$root" "${SECURITY_FLEET_MODE:-release}" "$script_dir/project.json" <<'PY' || notify_status=$?
+python3 - "$output" "$GITHUB_STEP_SUMMARY" "$root" "${SECURITY_FLEET_MODE:-release}" "$script_dir/project.json" "$source_root" <<'PY' || notify_status=$?
 import base64, datetime as dt, gzip, json, os, sys
 from pathlib import Path
 p=Path(sys.argv[1]); result=json.loads((p/('summary.json' if (p/'summary.json').exists() else 'failure.json')).read_text())
 root=Path(sys.argv[3]); mode=sys.argv[4]
 config=json.loads(Path(sys.argv[5]).read_text())
+if result['status']=='incomplete' and config.get('coverageNote'):
+ result['coverageNote']=config['coverageNote']
 manifest=config.get('exceptionsManifest')
 if manifest:
- approval=json.loads((Path(os.environ['GITHUB_WORKSPACE'])/manifest).read_text())['approval']
+ approval=json.loads((Path(sys.argv[6])/manifest).read_text())['approval']
  expiry=dt.datetime.fromisoformat(approval['expiresAt'].replace('Z','+00:00'))
  remaining=expiry-dt.datetime.now(dt.timezone.utc)
  result['exceptionWindow']={'expiresAt':approval['expiresAt'],
