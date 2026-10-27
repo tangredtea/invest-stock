@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "project": "tangredtea/invest-stock",
+  "toolkitVersion": "1.0.0",
+  "sourceDirectory": ".",
+  "schedule": "weekly",
+  "exceptionsManifest": null
+}
