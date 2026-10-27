@@ -9,13 +9,8 @@ permissions:
   packages: write
 
 jobs:
-  fleet-security-source:
-    permissions:
-      contents: read
-    uses: ./.github/workflows/security-source.yml
 
   publish:
-    needs: fleet-security-source
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
